@@ -8,6 +8,12 @@ set(MVCLIGHT_WHITELIST_SOURCES
     # ---- 自研 Facade（业务逻辑唯一写入区）----
     light/light_api.cpp
     light/light_txpool.cpp
+    # ---- Phase 1：P2P 网络层与状态机（回退方案，不链接上游 net.cpp）----
+    light/light_sha256.cpp
+    light/light_socket.cpp
+    light/light_message.cpp
+    light/light_state.cpp
+    light/light_peer.cpp
 )
 
 # ---- 黑名单防回归：白名单中出现以下路径直接 FATAL ----
@@ -37,6 +43,7 @@ target_include_directories(mvclight_objects
 
 if(MSVC)
     target_compile_options(mvclight_objects PRIVATE /W4 /permissive-)
+    target_link_libraries(mvclight_objects INTERFACE ws2_32)
 else()
     target_compile_options(mvclight_objects PRIVATE -Wall -Wextra -fvisibility=hidden)
 endif()
@@ -52,6 +59,10 @@ target_include_directories(mvclight
     PRIVATE
         ${CMAKE_CURRENT_SOURCE_DIR}
 )
+
+if(WIN32)
+    target_link_libraries(mvclight PRIVATE ws2_32)
+endif()
 
 set_target_properties(mvclight PROPERTIES
     CXX_STANDARD 17
