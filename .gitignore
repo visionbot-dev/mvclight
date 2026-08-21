@@ -1,0 +1,37 @@
+# Build directories
+build*/
+out/
+cmake-build-*/
+
+# IDE
+.vscode/
+.idea/
+*.user
+
+# CMake
+CMakeCache.txt
+CMakeFiles/
+cmake_install.cmake
+CTestTestfile.cmake
+Testing/
+
+# Platform artifacts
+*.o
+*.obj
+*.a
+*.lib
+*.so
+*.so.*
+*.dylib
+*.dll
+*.dylib
+*.exe
+*.pdb
+*.ilk
+*.exp
+
+# Runtime storage
+store/
+*.db
+*.db-wal
+*.db-shm

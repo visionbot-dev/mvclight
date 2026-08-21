@@ -1,0 +1,60 @@
+{
+  "upstream_version": "0.2.1.0",
+  "upstream_root": "D:/Project/Sample/microvisionchain/src",
+  "imports": [
+    {
+      "source": "uint256.h",
+      "dest": "src/uint256.h",
+      "status": "pending",
+      "note": "Phase 2/3 导入；当前 Phase 0 使用 src/light/light_uint256.h 临时替代（避免 Boost/rpc 依赖）"
+    },
+    {
+      "source": "arith_uint256.h",
+      "dest": "src/arith_uint256.h",
+      "status": "pending"
+    },
+    {
+      "source": "arith_uint256.cpp",
+      "dest": "src/arith_uint256.cpp",
+      "status": "pending"
+    },
+    {
+      "source": "crypto/common.h",
+      "dest": "src/crypto/common.h",
+      "status": "pending"
+    },
+    {
+      "source": "compat/endian.h",
+      "dest": "src/compat/endian.h",
+      "status": "pending"
+    },
+    {
+      "source": "utilstrencodings.h",
+      "dest": "src/utilstrencodings.h",
+      "status": "pending",
+      "patch": "utilstrencodings-no-rpc.patch",
+      "note": "需去除 rpc/text_writer.h 依赖后导入"
+    },
+    {
+      "source": "utilstrencodings.cpp",
+      "dest": "src/utilstrencodings.cpp",
+      "status": "pending",
+      "patch": "utilstrencodings-no-rpc.patch"
+    },
+    {
+      "source": "tinyformat.h",
+      "dest": "src/tinyformat.h",
+      "status": "pending"
+    },
+    {
+      "source": "hash.h",
+      "dest": "src/hash.h",
+      "status": "pending"
+    },
+    {
+      "source": "hash.cpp",
+      "dest": "src/hash.cpp",
+      "status": "pending"
+    }
+  ]
+}
