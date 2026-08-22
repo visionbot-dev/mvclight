@@ -58,15 +58,27 @@ add_subdirectory(src/univalue)
 file(GLOB_RECURSE MVC_CORE_SOURCES CONFIGURE_DEPENDS
     "${CMAKE_CURRENT_SOURCE_DIR}/src/*.cpp")
 list(FILTER MVC_CORE_SOURCES EXCLUDE REGEX
-    "/(rpc|wallet|mining|zmq|qt|http|test|bench|config|crypto|leveldb|secp256k1|univalue|double_spend|invalid_txn_sinks)/")
+    "/(rpc|wallet|zmq|qt|http|test|bench|config|crypto|leveldb|secp256k1|univalue)/")
 list(FILTER MVC_CORE_SOURCES EXCLUDE REGEX
-    "/(init|noui|rest|httprpc|httpserver|vmtouch|mvc-cli|mvc-tx|mvcd|abort_node)\\.cpp$")
+    "/(init|noui|rest|httprpc|httpserver|vmtouch|mvc-cli|mvc-tx|mvcd)\\.cpp$")
 list(FILTER MVC_CORE_SOURCES EXCLUDE REGEX
     "/(compat/glibc[a-z_]*|compat/strnlen|compat/glibcxx_sanity|compat/glibc_sanity)\\.cpp$")
+# rpc 目录整体排除后，显式补回网络内核依赖的 jsonwriter/webhook_client/client
+list(APPEND MVC_CORE_SOURCES
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/rpc/jsonwriter.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/rpc/webhook_client.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/rpc/client.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/rpc/client_config.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/rpc/http_request.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/rpc/http_response.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/rpc/protocol.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/leveldb/helpers/memenv/memenv.cc"
+)
 
 add_library(mvc_core STATIC ${MVC_CORE_SOURCES})
 target_include_directories(mvc_core PUBLIC
     "${CMAKE_CURRENT_SOURCE_DIR}/src"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/leveldb"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/leveldb/include"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/leveldb/helpers/memenv"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/secp256k1/include"

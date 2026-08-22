@@ -134,4 +134,11 @@ if(BUILD_MVC_LIGHT_UPSTREAM_CORE)
         "${BOOST_ROOT_CACHE}/lib64-msvc-14.3/libboost_thread-vc143-mt-x64-1_85.lib"
         "${BOOST_ROOT_CACHE}/lib64-msvc-14.3/libboost_system-vc143-mt-x64-1_85.lib"
     )
+
+    add_executable(test_light_nodecore integration/test_light_nodecore.cpp)
+    target_include_directories(test_light_nodecore PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}/unit
+        ${CMAKE_CURRENT_SOURCE_DIR}/..
+    )
+    target_link_libraries(test_light_nodecore PRIVATE mvclight_nodecore)
 endif()

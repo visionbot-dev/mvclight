@@ -40,6 +40,7 @@ if(BUILD_MVC_LIGHT_UPSTREAM_CORE)
     set_property(TARGET mvc_core PROPERTY INTERFACE_LINK_LIBRARIES
         "${MVC_CORE_ROOT}/Release/mvc_core.lib"
         "${MVC_CORE_ROOT}/src/leveldb/Release/leveldb.lib"
+        "${MVC_CORE_ROOT}/src/leveldb/Release/leveldb-sse4.2.lib"
         "${MVC_CORE_ROOT}/src/crypto/Release/crypto.lib"
         "${MVC_CORE_ROOT}/src/secp256k1/Release/secp256k1.lib"
         "${MVC_CORE_ROOT}/src/univalue/Release/univalue.lib"

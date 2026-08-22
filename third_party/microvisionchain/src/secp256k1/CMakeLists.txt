@@ -98,6 +98,9 @@ endfunction(link_secp256k1_internal)
 
 # Recovery module
 option(SECP256K1_ENABLE_MODULE_RECOVERY "Build libsecp256k1's recovery module" ON)
+if(SECP256K1_ENABLE_MODULE_RECOVERY)
+    set(ENABLE_MODULE_RECOVERY 1)
+endif()
 
 # ECDH module
 option(SECP256K1_ENABLE_MODULE_ECDH "Build libsecp256k1's ECDH module" OFF)
