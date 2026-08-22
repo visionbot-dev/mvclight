@@ -46,8 +46,12 @@ bool CLightNodeCore::Init(const std::string& network, const std::string& data_di
     InitSignatureCache();
     InitScriptExecutionCache();
 
-    Config& config = GlobalConfig::GetModifiableGlobalConfig();
-    (void)config;
+    ConfigInit& config = GlobalConfig::GetModifiableGlobalConfig();
+    std::printf("[nodecore] init setdefault before\n");
+    std::fflush(stdout);
+    config.SetDefaultBlockSizeParams(Params().GetDefaultBlockSizeParams());
+    std::printf("[nodecore] init setdefault after\n");
+    std::fflush(stdout);
 
     if (!data_dir.empty()) {
         gArgs.SoftSetArg("-datadir", data_dir);
@@ -57,6 +61,8 @@ bool CLightNodeCore::Init(const std::string& network, const std::string& data_di
     gArgs.SoftSetBoolArg("-listen", false);
     gArgs.SoftSetBoolArg("-dnsseed", true);
     gArgs.SoftSetArg("-maxconnections", "8");
+    gArgs.SoftSetArg("-debug", "net");
+    gArgs.SoftSetBoolArg("-printtoconsole", true);
 
     std::printf("[nodecore] init ok network=%s\n",
                 network.empty() ? "main" : network.c_str());
@@ -124,6 +130,11 @@ bool CLightNodeCore::Start() {
     std::printf("[nodecore] mempool ok size=%lu\n", static_cast<unsigned long>(mempool.Size()));
 
     // ---- Phase B-4：CConnman / PeerLogicValidation（init.cpp Step 6/11 裁剪版）----
+    if (!SetupNetworking()) {
+        std::printf("[nodecore] SetupNetworking failed\n");
+        return false;
+    }
+
     boost::thread_group* threadGroup = new boost::thread_group();
     CScheduler* scheduler = new CScheduler();
     scheduler->startServiceThread(*threadGroup);
@@ -154,16 +165,20 @@ bool CLightNodeCore::Start() {
     connOptions.nSendBufferMaxSize = gArgs.GetArgAsBytes("-maxsendbuffer", DEFAULT_MAXSENDBUFFER, ONE_KILOBYTE);
     connOptions.nReceiveFloodSize = gArgs.GetArgAsBytes("-maxreceivebuffer", DEFAULT_MAXRECEIVEBUFFER, ONE_KILOBYTE);
 
-    // B-5：接入种子节点（一次性出站尝试）
-    g_connman->AddOneShot("47.242.24.63:9883");
-    g_connman->AddOneShot("47.242.24.64:9883");
-
     std::string strNodeError;
     if (!g_connman->Start(*scheduler, strNodeError, connOptions)) {
         std::printf("[nodecore] connman.Start failed: %s\n", strNodeError.c_str());
         return false;
     }
     std::printf("[nodecore] connman started\n");
+
+    // B-5：直接发起种子连接（绕过 one-shot 线程，便于验证网络内核连通性）
+    {
+        CAddress seedAddr;
+        NodeConnectInfo seedInfo{seedAddr, "47.242.24.63:9883"};
+        bool opened = g_connman->OpenNetworkConnection(seedInfo, nullptr, true);
+        std::printf("[nodecore] direct seed open=%d\n", opened ? 1 : 0);
+    }
 
     m_running = true;
     return true;

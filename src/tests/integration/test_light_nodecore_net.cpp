@@ -20,7 +20,10 @@ int main() {
         std::printf("NODECORE_START_FAILED\n");
         return 2;
     }
-    std::this_thread::sleep_for(std::chrono::seconds(20));
-    std::printf("NODECORE_CONNECTIONS %zu\n", core.GetNodeCount());
+    for (int i = 1; i <= 4; ++i) {
+        std::this_thread::sleep_for(std::chrono::seconds(5));
+        std::printf("NODECORE_CONNECTIONS %zu (t=%ds)\n", core.GetNodeCount(), i * 5);
+        std::fflush(stdout);
+    }
     return 0;
 }
