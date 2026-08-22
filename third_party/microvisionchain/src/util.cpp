@@ -459,7 +459,7 @@ void ClearDatadirCache() {
 
 fs::path GetConfigFile(const std::string &confPath) {
     fs::path pathConfigFile(confPath);
-    if (!pathConfigFile.is_complete())
+    if (!pathConfigFile.is_absolute())
         pathConfigFile = GetDataDir(false) / pathConfigFile;
 
     return pathConfigFile;

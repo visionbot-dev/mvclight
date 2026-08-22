@@ -46,12 +46,10 @@ if(UNIVALUE_BUILD_TESTS)
 	add_dependencies(check-univalue json_test)
 endif(UNIVALUE_BUILD_TESTS)
 
-# Generate include/univalue_escapes.h
-include(NativeExecutable)
-add_native_executable(univalue_gen gen/gen.cpp)
-native_target_include_directories(univalue_gen PUBLIC include)
-
-# Custom target to regenerate univalue_escapes.h
-add_custom_target(generate_univalue_escapes_h
-	COMMAND univalue_gen > ${CMAKE_CURRENT_SOURCE_DIR}/include/univalue_escapes.h
-)
+# Generate include/univalue_escapes.h — 已随源码提供，跳过 NativeExecutable
+# include(NativeExecutable)
+# add_native_executable(univalue_gen gen/gen.cpp)
+# native_target_include_directories(univalue_gen PUBLIC include)
+# add_custom_target(generate_univalue_escapes_h
+#     COMMAND univalue_gen > ${CMAKE_CURRENT_SOURCE_DIR}/include/univalue_escapes.h
+# )
