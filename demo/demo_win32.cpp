@@ -471,9 +471,14 @@ bool RunSyncCore(const std::string& host, int port, std::string& err_out,
             if (g_stop.load()) break;
             LightMessage msg;
             if (!peer.ReadMessage(msg)) {
-                err_out = "read failed";
-                AppendLog(g_state, "[sync] " + err_out);
-                break;
+                if (g_stop.load()) break;
+                if (!peer.IsConnected()) {
+                    err_out = "read failed (disconnected)";
+                    AppendLog(g_state, "[sync] " + err_out);
+                    break;
+                }
+                // 接收超时：重试读取
+                continue;
             }
             if (msg.command != "headers") {
                 // 同步期间也会收到 MERKLEBLOCK/TX/PING，直接分发
@@ -490,10 +495,17 @@ bool RunSyncCore(const std::string& host, int port, std::string& err_out,
             const uint8_t* end = p + msg.payload.size();
             bool ok = true;
             uint64_t count = ReadCompactSize(p, end, ok);
-            if (!ok || count == 0 || count > 2000 ||
+            if (!ok || count > 2000 ||
                 p + count * (LightBlockHeader::kHeaderSize + 1) > end) {
                 err_out = "bad headers format";
                 AppendLog(g_state, "[sync] " + err_out);
+                break;
+            }
+            if (count == 0) {
+                // 已在链尖，无新头
+                finished = true;
+                got = true;
+                AppendLog(g_state, "[sync] no new headers (at tip)");
                 break;
             }
             int64_t processed = 0;
@@ -582,7 +594,6 @@ bool RunSyncCore(const std::string& host, int port, std::string& err_out,
             g_state.dirty = true;
         }
         AppendLog(g_state, "[sync] steady-state: watching MERKLEBLOCK/TX");
-        int timeouts = 0;
         while (!g_stop.load()) {
             if (g_filter_dirty.load()) {
                 RebuildFilter(peer);
@@ -590,14 +601,15 @@ bool RunSyncCore(const std::string& host, int port, std::string& err_out,
             LightMessage msg;
             if (!peer.ReadMessage(msg)) {
                 if (g_stop.load()) break;
-                if (++timeouts >= 5) {
-                    err_out = "read timeout/disconnect";
+                if (!peer.IsConnected()) {
+                    err_out = "disconnected";
                     AppendLog(g_state, "[sync] " + err_out);
                     break;
                 }
+                // 接收超时（无消息）：连接仍保持，继续等待
+                std::this_thread::sleep_for(std::chrono::milliseconds(200));
                 continue;
             }
-            timeouts = 0;
             if (msg.command == "merkleblock") {
                 HandleMerkleBlock(msg, chain);
             } else if (msg.command == "tx") {

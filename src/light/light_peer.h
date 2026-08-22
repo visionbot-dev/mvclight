@@ -63,6 +63,9 @@ public:
     // 读取一条消息（不自动处理）
     bool ReadMessage(LightMessage& msg);
 
+    // 底层 socket 是否仍连接（用于区分 recv 超时与真实断开）
+    bool IsConnected() const { return m_sock.IsConnected(); }
+
     // 状态机：仅允许合法迁移
     bool SetState(PeerState state);
     PeerState GetState() const { return m_state; }

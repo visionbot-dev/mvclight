@@ -201,11 +201,28 @@ size_t CLightSocket::RecvSome(uint8_t* buf, size_t max_len) {
     if (!m_connected) return 0;
     socket_t sock = static_cast<socket_t>(m_sock);
     int rc = ::recv(sock, reinterpret_cast<char*>(buf), static_cast<int>(max_len), 0);
-    if (rc <= 0) {
+    if (rc > 0) {
+        return static_cast<size_t>(rc);
+    }
+    if (rc == 0) {
+        // 对端关闭
         Close();
         return 0;
     }
-    return static_cast<size_t>(rc);
+    // rc < 0：区分接收超时与真实错误
+#ifdef _WIN32
+    int err = WSAGetLastError();
+    if (err == WSAETIMEDOUT) {
+        return 0; // 超时，连接保持
+    }
+#else
+    int err = errno;
+    if (err == EAGAIN || err == EWOULDBLOCK) {
+        return 0; // 超时，连接保持
+    }
+#endif
+    Close();
+    return 0;
 }
 
 void CLightSocket::Close() {
