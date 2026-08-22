@@ -91,6 +91,8 @@ constexpr int IDC_TX_LIST = 113;
 constexpr int IDC_LOG_EDIT = 114;
 constexpr int IDC_RESET_BTN = 115;
 constexpr int IDC_CLEARLOG_BTN = 116;
+constexpr int IDC_BACKFILL_EDIT = 117;
+constexpr int IDC_BACKFILL_BTN = 118;
 constexpr int WM_APP_STATE = WM_APP + 1;
 
 struct TxItem {
@@ -120,8 +122,10 @@ struct DemoState {
 std::atomic<bool> g_stop{false};
 std::atomic<bool> g_worker_running{false};
 std::atomic<bool> g_filter_dirty{false};
+std::atomic<bool> g_backfill_running{false};
 std::thread g_worker;
 DemoState g_state;
+CLightChainStore g_chain;
 CLightWatchStore g_store;
 CPendingTxMap g_pending;
 HWND g_hwnd = nullptr;
@@ -642,6 +646,7 @@ bool RunSyncCore(const std::string& host, int port, std::string& err_out,
     }
 
     // 保存断点续传状态（GUI 与 selftest 共用）
+    g_chain = chain; // 供 Backfill 使用
     {
         LightBlockHeader tip;
         if (chain.GetTip(tip)) {
@@ -675,6 +680,75 @@ void WorkerMain(const std::string& host, int port) {
     RefreshTxList();
     g_worker_running = false;
     g_stop.store(false);
+    if (g_hwnd) PostMessage(g_hwnd, WM_APP_STATE, 0, 0);
+}
+
+// P2P 回扫最近 N 块：独立临时连接，逐块 getdata(MSG_FILTERED_BLOCK)
+void BackfillWorker(const std::string& host, int port, int n_blocks) {
+    g_backfill_running = true;
+    AppendLog(g_state, "[backfill] start last " + std::to_string(n_blocks) + " blocks");
+
+    CLightPeer peer;
+    if (!peer.ConnectAndHandshake(host, port, 10000, 1000)) {
+        AppendLog(g_state, "[backfill] connect/handshake failed");
+        g_backfill_running = false;
+        return;
+    }
+
+    // 回扫需要过滤器命中，先按当前 watch 地址重建
+    RebuildFilter(peer);
+
+    int64_t tip = g_chain.TipHeight();
+    int scanned = 0;
+    for (int i = 0; i < n_blocks && tip - i >= 0; ++i) {
+        int64_t h = tip - i;
+        LightBlockHeader hdr;
+        if (!g_chain.GetHeaderAtHeight(h, hdr)) continue;
+
+        std::vector<uint8_t> payload;
+        AppendCompactSize(payload, 1);
+        AppendLE32(payload, 3); // MSG_FILTERED_BLOCK
+        const uint256& blk = hdr.GetHash();
+        payload.insert(payload.end(), blk.begin(), blk.end());
+        if (!(peer.SendMessage)("getdata", payload)) break;
+
+        // 读取 merkleblock + 后续 tx
+        bool got_mb = false;
+        size_t tx_received = 0;
+        for (int attempt = 0; attempt < 20; ++attempt) {
+            LightMessage msg;
+            if (!peer.ReadMessage(msg)) {
+                if (!peer.IsConnected()) {
+                    AppendLog(g_state, "[backfill] disconnected");
+                    g_backfill_running = false;
+                    return;
+                }
+                break; // 超时：本块结束
+            }
+            if (msg.command == "merkleblock") {
+                HandleMerkleBlock(msg, g_chain);
+                got_mb = true;
+            } else if (msg.command == "tx") {
+                HandleTxMessage(msg);
+                ++tx_received;
+            } else if (msg.command == "ping") {
+                (peer.SendMessage)("pong", msg.payload);
+            }
+            if (got_mb && tx_received > 0) break;
+        }
+
+        ++scanned;
+        if (scanned % 10 == 0 || i == n_blocks - 1) {
+            AppendLog(g_state, "[backfill] scanned " + std::to_string(scanned) +
+                      "/" + std::to_string(n_blocks) + " height=" + std::to_string(h));
+        }
+        std::this_thread::sleep_for(std::chrono::milliseconds(50)); // 防拉黑
+    }
+
+    peer.Disconnect();
+    RefreshTxList();
+    AppendLog(g_state, "[backfill] done scanned=" + std::to_string(scanned));
+    g_backfill_running = false;
     if (g_hwnd) PostMessage(g_hwnd, WM_APP_STATE, 0, 0);
 }
 
@@ -776,9 +850,13 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
         mk("BUTTON", "Remove", BS_PUSHBUTTON, 405, 180, 70, 24, IDC_WATCH_DEL);
         mk("LISTBOX", "", WS_BORDER | WS_VSCROLL, 10, 210, 265, 120, IDC_WATCH_LIST);
 
-        mk("STATIC", "Transactions:", 0, 285, 300, 100, 20, 0);
+        mk("STATIC", "Backfill N:", 0, 10, 340, 70, 20, 0);
+        mk("EDIT", "100", WS_BORDER | ES_AUTOHSCROLL, 80, 340, 60, 22, IDC_BACKFILL_EDIT);
+        mk("BUTTON", "Backfill", BS_PUSHBUTTON, 145, 340, 80, 24, IDC_BACKFILL_BTN);
+
+        mk("STATIC", "Transactions:", 0, 375, 300, 100, 20, 0);
         HWND tx = mk("SysListView32", "", WS_BORDER | LVS_REPORT | LVS_SINGLESEL,
-                     10, 305, 585, 130, IDC_TX_LIST);
+                     10, 395, 585, 130, IDC_TX_LIST);
         LVCOLUMNA col{};
         col.mask = LVCF_TEXT | LVCF_WIDTH;
         col.pszText = const_cast<char*>("txid");
@@ -795,7 +873,7 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
         SendMessageA(tx, LVM_INSERTCOLUMNA, 3, reinterpret_cast<LPARAM>(&col));
 
         mk("EDIT", "", WS_BORDER | ES_MULTILINE | ES_AUTOVSCROLL | ES_READONLY |
-           WS_VSCROLL, 10, 445, 585, 160, IDC_LOG_EDIT);
+           WS_VSCROLL, 10, 535, 585, 160, IDC_LOG_EDIT);
         SetTimer(hwnd, 1, 200, nullptr);
         return 0;
     }
@@ -866,6 +944,29 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
             std::lock_guard<std::mutex> lock(g_state.mu);
             g_state.logs.clear();
             g_state.dirty = true;
+        } else if (id == IDC_BACKFILL_BTN) {
+            if (g_backfill_running.load()) {
+                AppendLog(g_state, "[ui] backfill already running");
+                break;
+            }
+            if (g_chain.TipHeight() < 0) {
+                AppendLog(g_state, "[ui] no chain data, connect/sync first");
+                break;
+            }
+            char buf[64];
+            GetDlgItemTextA(hwnd, IDC_BACKFILL_EDIT, buf, sizeof(buf));
+            int n = atoi(buf);
+            if (n <= 0 || n > 10000) n = 100;
+            char peerbuf[256];
+            GetDlgItemTextA(hwnd, IDC_PEER_EDIT, peerbuf, sizeof(peerbuf));
+            std::string host;
+            int port = 0;
+            if (!SplitHostPort(peerbuf, host, port)) {
+                AppendLog(g_state, "[ui] invalid peer address");
+                break;
+            }
+            std::thread([host, port, n]() { BackfillWorker(host, port, n); }).detach();
+            AppendLog(g_state, "[ui] backfill requested N=" + std::to_string(n));
         }
         return 0;
     }
@@ -982,7 +1083,7 @@ int WINAPI WinMain(HINSTANCE hInst, HINSTANCE, LPSTR cmd, int nShow) {
 
     HWND hwnd = CreateWindowA(wc.lpszClassName, "MVCLight Light Node Demo",
                               WS_OVERLAPPEDWINDOW, CW_USEDEFAULT, CW_USEDEFAULT,
-                              620, 660, nullptr, nullptr, hInst, nullptr);
+                              620, 740, nullptr, nullptr, hInst, nullptr);
     if (!hwnd) {
         WSACleanup();
         return 1;
