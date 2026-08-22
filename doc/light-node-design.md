@@ -550,6 +550,15 @@ mvc_light_config cfg = {
   - 命中 → 写 `CLightWatchStore`(LevelDB 双表 tx_store + addr_tx_index)
 - 区块文件:启用 `-prune=550`(或更大),上游验证后自动删除已处理区块文件,满足“交易入库后再删区块文件”。
 
+#### 11.3.1 指定高度起步(start_height)
+
+- `mvc_light_config.start_height` 复用为“区块体开始下载高度”：
+  - `start_height <= 0`：从头开始
+  - `0 < start_height <= checkpoint.height`：以内置 Checkpoint 为信任锚，只下载 `start_height` 之后的区块体；之前历史不下载、不扫描
+  - `start_height > checkpoint.height`：调用方必须提供该高度的**可信 block hash**（防投毒），否则拒绝启动；或先快速拉取 header 链（header 很小）到该高度，再以其为锚点
+- Header 链仍从头/checkpoint 快速同步（仅 80B/块，约 15MB/18.6 万块，分钟级），但**区块体下载只从 start_height 开始**
+- 本地过滤只对 start_height 之后的区块生效；之前历史交易不自动扫描（可配合 Backfill 单独补扫）
+
 ### 11.4 构建形态
 
 ```
@@ -569,6 +578,7 @@ src/light/                     (facade + light_local_filter + CWatchTxStore + C 
 - 主网 ≥2 条连接稳定 5 分钟,网络行为与全节点一致
 - watch 地址交易(新区块 + mempool)自动入库 LevelDB
 - 历史用例:`1J3NjfS7eYTddzina6s4bddvEwu4W8UUwc` 高度 185136 交易自动出现
+- **start_height=185000 起步：不下载 185000 之前的区块体，仍能同步到链尖并过滤新交易**
 - prune 后区块文件删除,交易仍可查询
 - `check_blacklist.py` 更新并通过;符号仍只导出 `mvc_light_*`
 
