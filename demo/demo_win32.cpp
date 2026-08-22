@@ -21,35 +21,47 @@
 
 #include <algorithm>
 #include <atomic>
+#include <chrono>
 #include <cstdint>
 #include <cstdio>
 #include <cstring>
 #include <ctime>
 #include <fstream>
 #include <mutex>
+#include <set>
 #include <string>
 #include <thread>
 #include <vector>
 
 #include "light/light_chainstore.h"
 #include "light/light_checkpoints.h"
+#include "light/light_filter.h"
 #include "light/light_header.h"
+#include "light/light_merkle.h"
 #include "light/light_message.h"
 #include "light/light_peer.h"
+#include "light/light_pendingtx.h"
+#include "light/light_sha256.h"
 #include "light/light_validation.h"
 #include "light/light_watchstore.h"
 #include "light/mvc_light.h"
 
+using mvclight::CBloomFilter;
 using mvclight::CLightChainStore;
 using mvclight::CLightPeer;
 using mvclight::CLightWatchStore;
+using mvclight::CPendingTxMap;
 using mvclight::CheckCheckpoint;
 using mvclight::GetBuiltinCheckpoint;
 using mvclight::LightBlockHeader;
+using mvclight::LightMerkleBlock;
 using mvclight::LightMessage;
 using mvclight::MainnetMagic;
+using mvclight::PendingEntry;
+using mvclight::SHA256D;
 using mvclight::TxRecord;
 using mvclight::ValidateHeader;
+using mvclight::kBloomUpdateAll;
 using mvclight::uint256;
 using mvclight::uint256S;
 
@@ -104,9 +116,11 @@ struct DemoState {
 
 std::atomic<bool> g_stop{false};
 std::atomic<bool> g_worker_running{false};
+std::atomic<bool> g_filter_dirty{false};
 std::thread g_worker;
 DemoState g_state;
 CLightWatchStore g_store;
+CPendingTxMap g_pending;
 HWND g_hwnd = nullptr;
 
 void AppendLog(DemoState& s, const std::string& line) {
@@ -180,49 +194,165 @@ bool SplitHostPort(const std::string& peer, std::string& host, int& port) {
 std::string kDefaultPeerHost();
 int kDefaultPeerPort();
 
-// 从 demo 地址生成一个稳定 txid（演示用）
-uint256 DemoTxidForAddr(const std::string& addr) {
-    uint256 txid;
-    auto* p = txid.begin();
-    size_t i = 0;
-    for (char c : addr) {
-        p[i % 32] ^= static_cast<uint8_t>(c);
-        ++i;
-    }
-    p[0] ^= 0xAA;
-    p[1] ^= 0x55;
-    return txid;
+int64_t GetNowMs() {
+    return std::chrono::duration_cast<std::chrono::milliseconds>(
+        std::chrono::steady_clock::now().time_since_epoch()).count();
 }
 
-void CommitDemoTx(const std::string& addr) {
-    TxRecord rec;
-    rec.txid = DemoTxidForAddr(addr);
-    rec.height = kCheckpointHeight + 1;
-    rec.block_hash = GetBuiltinCheckpoint().hash;
-    rec.tx_blob = {1, 2, 3};
-    rec.script_verified = true;
-    if (g_store.CommitTx(addr, rec)) {
-        std::lock_guard<std::mutex> lock(g_state.mu);
-        g_state.txs.clear();
+// 从所有 watch 地址重建交易列表（去重）
+void RefreshTxList() {
+    std::lock_guard<std::mutex> lock(g_state.mu);
+    std::vector<std::string> addrs = g_state.watch_addresses;
+    std::set<std::string> seen;
+    g_state.txs.clear();
+    for (const auto& addr : addrs) {
         std::vector<mvclight::uint256> txids;
         g_store.GetTxidsByAddr(addr, txids);
         for (const auto& txid : txids) {
-            TxRecord out;
-            if (g_store.GetTx(txid, out)) {
+            std::string hex = txid.GetHex();
+            if (!seen.insert(hex).second) continue;
+            TxRecord rec;
+            if (g_store.GetTx(txid, rec)) {
                 TxItem item;
-                item.txid = txid.GetHex();
-                item.block_hash = out.block_hash.GetHex();
-                item.height = out.height;
-                item.verified = out.script_verified;
+                item.txid = hex;
+                item.block_hash = rec.block_hash.GetHex();
+                item.height = rec.height;
+                item.verified = rec.script_verified;
                 g_state.txs.push_back(item);
             }
         }
-        g_state.dirty = true;
     }
+    g_state.dirty = true;
+}
+
+// 从 watch 地址重建 Bloom 过滤器并发送 FILTERLOAD
+void RebuildFilter(CLightPeer& peer) {
+    std::vector<std::string> addrs;
+    {
+        std::lock_guard<std::mutex> lock(g_state.mu);
+        addrs = g_state.watch_addresses;
+    }
+    if (addrs.empty()) {
+        g_filter_dirty = false;
+        return;
+    }
+    CBloomFilter filter = CBloomFilter::Create(addrs.size(), 0.0001, 0, kBloomUpdateAll);
+    for (const auto& a : addrs) {
+        filter.Insert(reinterpret_cast<const uint8_t*>(a.data()), a.size());
+    }
+    std::vector<uint8_t> payload;
+    if (!filter.Serialize(payload)) {
+        AppendLog(g_state, "[filter] serialize failed");
+        return;
+    }
+    if (!(peer.SendMessage)("filterload", payload)) {
+        AppendLog(g_state, "[filter] send failed");
+        return;
+    }
+    AppendLog(g_state, "[filter] filterload elements=" + std::to_string(addrs.size()) +
+              " bytes=" + std::to_string(payload.size()));
+    g_filter_dirty = false;
+}
+
+// 最简原始交易解析：仅计算 txid（demo 展示用）
+bool ParseTxid(const uint8_t* p, size_t len, uint256& txid) {
+    if (len < 10) return false;
+    const uint8_t* q = p;
+    const uint8_t* end = p + len;
+    q += 4; // version
+    bool ok = true;
+    uint64_t vin = ReadCompactSize(q, end, ok);
+    if (!ok) return false;
+    for (uint64_t i = 0; i < vin; ++i) {
+        q += 32 + 4; // prevout hash + n
+        if (q > end) return false;
+        uint64_t slen = ReadCompactSize(q, end, ok);
+        if (!ok || q + slen + 4 > end) return false;
+        q += slen + 4; // scriptSig + sequence
+    }
+    uint64_t vout = ReadCompactSize(q, end, ok);
+    if (!ok) return false;
+    for (uint64_t i = 0; i < vout; ++i) {
+        q += 8; // value
+        if (q > end) return false;
+        uint64_t slen = ReadCompactSize(q, end, ok);
+        if (!ok || q + slen > end) return false;
+        q += slen; // scriptPubKey
+    }
+    q += 4; // locktime
+    if (q != end) return false;
+    uint8_t hash[32];
+    SHA256D(p, len, hash);
+    txid = uint256(std::vector<uint8_t>(hash, hash + 32));
+    return true;
+}
+
+void CommitPairedTx(const PendingEntry& out) {
+    std::vector<std::string> addrs;
+    {
+        std::lock_guard<std::mutex> lock(g_state.mu);
+        addrs = g_state.watch_addresses;
+    }
+    if (addrs.empty()) return;
+    TxRecord rec;
+    rec.txid = out.txid;
+    rec.height = out.height;
+    rec.block_hash = out.block_hash;
+    rec.script_verified = true;
+    for (const auto& a : addrs) {
+        g_store.CommitTx(a, rec);
+    }
+    AppendLog(g_state, "[tx] paired+stored " + out.txid.GetHex() +
+              " height=" + std::to_string(out.height));
+    RefreshTxList();
+}
+
+void HandleMerkleBlock(const LightMessage& msg, CLightChainStore& chain) {
+    LightMerkleBlock mb;
+    if (!mb.Deserialize(msg.payload.data(), msg.payload.size())) {
+        AppendLog(g_state, "[merkle] deserialize failed");
+        return;
+    }
+    std::vector<uint256> matched;
+    uint256 root;
+    if (!mb.ExtractMatches(matched, root)) {
+        AppendLog(g_state, "[merkle] verify failed (root mismatch)");
+        return;
+    }
+    int64_t height = -1;
+    if (!chain.GetHeightByHash(mb.header.GetHash(), height)) {
+        height = chain.TipHeight() + 1;
+    }
+    int64_t now = GetNowMs();
+    for (const auto& txid : matched) {
+        g_pending.AddMerkle(txid, height, mb.header.GetHash(), now);
+        PendingEntry out;
+        if (g_pending.TryPair(txid, out)) {
+            CommitPairedTx(out);
+        }
+    }
+    AppendLog(g_state, "[merkle] block " + mb.header.GetHash().GetHex() +
+              " matched=" + std::to_string(matched.size()));
+}
+
+void HandleTxMessage(const LightMessage& msg) {
+    uint256 txid;
+    if (!ParseTxid(msg.payload.data(), msg.payload.size(), txid)) {
+        AppendLog(g_state, "[tx] parse failed");
+        return;
+    }
+    int64_t now = GetNowMs();
+    g_pending.AddTx(txid, now);
+    PendingEntry out;
+    if (g_pending.TryPair(txid, out)) {
+        CommitPairedTx(out);
+    }
+    AppendLog(g_state, "[tx] received " + txid.GetHex());
 }
 
 // 核心同步逻辑（GUI 工作线程与 --selftest 共用）
-bool RunSyncCore(const std::string& host, int port, std::string& err_out) {
+bool RunSyncCore(const std::string& host, int port, std::string& err_out,
+                 bool wait_for_txs) {
     CLightPeer peer;
     AppendLog(g_state, "[sync] connecting to " + host + ":" + std::to_string(port));
     if (!peer.ConnectAndHandshake(host, port, 10000, 10000)) {
@@ -238,6 +368,9 @@ bool RunSyncCore(const std::string& host, int port, std::string& err_out) {
         g_state.dirty = true;
     }
     AppendLog(g_state, "[sync] MAINNET_HANDSHAKE_OK");
+
+    // 有 watch 地址时先发送 FILTERLOAD
+    RebuildFilter(peer);
 
     CLightChainStore chain;
     uint256 locator;
@@ -261,7 +394,17 @@ bool RunSyncCore(const std::string& host, int port, std::string& err_out) {
                 AppendLog(g_state, "[sync] " + err_out);
                 break;
             }
-            if (msg.command != "headers") continue;
+            if (msg.command != "headers") {
+                // 同步期间也会收到 MERKLEBLOCK/TX/PING，直接分发
+                if (msg.command == "merkleblock") {
+                    HandleMerkleBlock(msg, chain);
+                } else if (msg.command == "tx") {
+                    HandleTxMessage(msg);
+                } else if (msg.command == "ping") {
+                    (peer.SendMessage)("pong", msg.payload);
+                }
+                continue;
+            }
             const uint8_t* p = msg.payload.data();
             const uint8_t* end = p + msg.payload.size();
             bool ok = true;
@@ -348,6 +491,42 @@ bool RunSyncCore(const std::string& host, int port, std::string& err_out) {
         }
     }
 
+    // Header 同步完成后进入稳态：持续接收 MERKLEBLOCK/TX（GUI 模式）
+    if (wait_for_txs && !g_stop.load()) {
+        {
+            std::lock_guard<std::mutex> lock(g_state.mu);
+            g_state.syncing = false;
+            g_state.connected = true;
+            g_state.peer_state = "STEADY";
+            g_state.dirty = true;
+        }
+        AppendLog(g_state, "[sync] steady-state: watching MERKLEBLOCK/TX");
+        int timeouts = 0;
+        while (!g_stop.load()) {
+            if (g_filter_dirty.load()) {
+                RebuildFilter(peer);
+            }
+            LightMessage msg;
+            if (!peer.ReadMessage(msg)) {
+                if (g_stop.load()) break;
+                if (++timeouts >= 5) {
+                    err_out = "read timeout/disconnect";
+                    AppendLog(g_state, "[sync] " + err_out);
+                    break;
+                }
+                continue;
+            }
+            timeouts = 0;
+            if (msg.command == "merkleblock") {
+                HandleMerkleBlock(msg, chain);
+            } else if (msg.command == "tx") {
+                HandleTxMessage(msg);
+            } else if (msg.command == "ping") {
+                (peer.SendMessage)("pong", msg.payload);
+            }
+        }
+    }
+
     {
         std::lock_guard<std::mutex> lock(g_state.mu);
         g_state.syncing = false;
@@ -368,7 +547,7 @@ bool RunSyncCore(const std::string& host, int port, std::string& err_out) {
 void WorkerMain(const std::string& host, int port) {
     g_worker_running = true;
     std::string err;
-    RunSyncCore(host, port, err);
+    RunSyncCore(host, port, err, true);
     g_worker_running = false;
     g_stop.store(false);
     if (g_hwnd) PostMessage(g_hwnd, WM_APP_STATE, 0, 0);
@@ -527,7 +706,7 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
                 g_state.watch_addresses.push_back(addr);
                 g_state.dirty = true;
             }
-            CommitDemoTx(addr);
+            g_filter_dirty.store(true); // 下次循环重建过滤器并发送 FILTERLOAD
             AppendLog(g_state, "[ui] watch add " + addr);
         } else if (id == IDC_WATCH_DEL) {
             HWND wl = GetDlgItem(hwnd, IDC_WATCH_LIST);
@@ -611,7 +790,7 @@ int SelftestMain() {
     }
 
     std::string err;
-    bool ok = RunSyncCore(kDefaultPeerHost(), kDefaultPeerPort(), err);
+    bool ok = RunSyncCore(kDefaultPeerHost(), kDefaultPeerPort(), err, false);
     WSACleanup();
 
     if (ok) {
