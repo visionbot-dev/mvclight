@@ -9,6 +9,7 @@
 #include <sync.h>
 #include <taskcancellation.h>
 #include <txdb.h>
+#include <txmempool.h>
 #include <util.h>
 #include <validation.h>
 
@@ -100,9 +101,18 @@ bool CLightNodeCore::Start() {
         LoadChainTip(chainparams);
     }
 
+    // ---- Phase B-3：mempool 初始化（init.cpp:3019-3024）----
+    mempool.SuspendSanityCheck();
+    mempool.getNonFinalPool().loadConfig();
+    mempool.InitMempoolTxDB();
+    if (!gArgs.GetArg("-persistmempool", DEFAULT_PERSIST_MEMPOOL)) {
+        mempool.ResumeSanityCheck();
+    }
+
     std::printf("[nodecore] chainstate ok tip=%s height=%d\n",
                 chainActive.Tip() ? chainActive.Tip()->GetBlockHash().GetHex().c_str() : "(null)",
                 chainActive.Height());
+    std::printf("[nodecore] mempool ok size=%lu\n", static_cast<unsigned long>(mempool.Size()));
     m_running = true;
     return true;
 }
