@@ -83,3 +83,8 @@ add_executable(test_phase5 integration/test_phase5.cpp)
 target_include_directories(test_phase5 PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/unit)
 target_link_libraries(test_phase5 PRIVATE mvclight_objects)
 add_test(NAME test_phase5 COMMAND test_phase5)
+
+# Phase 5 共识：ASERT
+add_executable(test_light_asert unit/test_light_asert.cpp)
+target_link_libraries(test_light_asert PRIVATE mvclight_objects)
+add_test(NAME test_light_asert COMMAND test_light_asert)

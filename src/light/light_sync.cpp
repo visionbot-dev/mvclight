@@ -1,5 +1,6 @@
 #include "light/light_sync.h"
 
+#include "light/light_asert.h"
 #include "light/light_header.h"
 #include "light/light_validation.h"
 
@@ -113,6 +114,15 @@ int CLightSync::ProcessHeaders(CLightPeer& peer, CLightChainStore& store,
                 if (!ValidateHeader(h, prev_ptr, height, historical, adjusted_time_now, reason)) {
                     last_reason = reason;
                     return -1;
+                }
+                // ASERT 难度连续性（新区段，prev 存在且高于锚点时生效）
+                if (!historical && prev_ptr != nullptr && height > 0) {
+                    LightASERTParams asert;
+                    uint32_t expected = GetNextASERTBits(*prev_ptr, height - 1, asert);
+                    if (h.nBits != expected) {
+                        last_reason = "bad-diffbits";
+                        return -1;
+                    }
                 }
                 store.AddHeader(h, height);
                 store.AddWork();

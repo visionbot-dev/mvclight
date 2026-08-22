@@ -28,6 +28,9 @@ set(MVCLIGHT_WHITELIST_SOURCES
     light/light_watchstore.cpp
     # ---- Phase 4：C ABI 接口封装与业务集成 ----
     light/light_sendmonitor.cpp
+    # ---- Phase 5：桌面端共识完善 ----
+    light/light_arith_uint256.cpp
+    light/light_asert.cpp
 )
 
 # ---- 黑名单防回归：白名单中出现以下路径直接 FATAL ----
