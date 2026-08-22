@@ -88,10 +88,8 @@ bool CLightPartialMerkleTree::Deserialize(const uint8_t*& p, const uint8_t* end)
     nTransactions = ReadLE32(p);
     p += 4;
     bool ok = true;
-    uint64_t nBytes = ReadCompactSize(p, end, ok);
-    if (!ok || nBytes > 1024 * 1024 || p + nBytes > end) return false;
-    vBits.assign(p, p + nBytes);
-    p += nBytes;
+
+    // 上游顺序：nTransactions -> vHash(CompactSize+hashes) -> vBits(CompactSize+bytes)
     uint64_t nHashes = ReadCompactSize(p, end, ok);
     if (!ok || nHashes > 1024 * 1024 || p + nHashes * 32 > end) return false;
     vHash.clear();
@@ -100,18 +98,23 @@ bool CLightPartialMerkleTree::Deserialize(const uint8_t*& p, const uint8_t* end)
         vHash.emplace_back(std::vector<uint8_t>(p, p + 32));
         p += 32;
     }
+
+    uint64_t nBytes = ReadCompactSize(p, end, ok);
+    if (!ok || nBytes > 1024 * 1024 || p + nBytes > end) return false;
+    vBits.assign(p, p + nBytes);
+    p += nBytes;
     return true;
 }
 
 std::vector<uint8_t> CLightPartialMerkleTree::Serialize() const {
     std::vector<uint8_t> out;
     WriteLE32(out, nTransactions);
-    WriteCompactSize(out, vBits.size());
-    out.insert(out.end(), vBits.begin(), vBits.end());
     WriteCompactSize(out, vHash.size());
     for (const auto& h : vHash) {
         out.insert(out.end(), h.begin(), h.end());
     }
+    WriteCompactSize(out, vBits.size());
+    out.insert(out.end(), vBits.begin(), vBits.end());
     return out;
 }
 
