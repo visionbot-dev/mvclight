@@ -21,6 +21,7 @@
 #include <memory>
 
 #include <mining/factory.h>
+#include <mining/journal_builder.h>
 #include <net/net_processing.h>
 #include <netmessagemaker.h>
 #include <protocol.h>
@@ -137,6 +138,18 @@ bool CLightNodeCore::Start() {
                 chainActive.Height());
     std::printf("[nodecore] mempool ok size=%lu\n", static_cast<unsigned long>(mempool.Size()));
 
+    // 激活创世块/最佳链（对应 init.cpp ThreadImport 尾部 ActivateBestChain）
+    {
+        CValidationState dummyState;
+        mining::CJournalChangeSetPtr changeSet{ mempool.getJournalBuilder().getNewChangeSet(mining::JournalUpdateReason::INIT) };
+        auto source = task::CCancellationSource::Make();
+        if (!ActivateBestChain(task::CCancellationToken::JoinToken(source->GetToken(), GetShutdownToken()), config, dummyState, changeSet)) {
+            std::printf("[nodecore] ActivateBestChain failed\n");
+            return false;
+        }
+    }
+    std::printf("[nodecore] chain activated height=%d\n", chainActive.Height());
+
     // ---- Phase B-4：CConnman / PeerLogicValidation（init.cpp Step 6/11 裁剪版）----
     if (!SetupNetworking()) {
         std::printf("[nodecore] SetupNetworking failed\n");
@@ -148,6 +161,7 @@ bool CLightNodeCore::Start() {
     boost::thread_group* threadGroup = new boost::thread_group();
     CScheduler* scheduler = new CScheduler();
     scheduler->startServiceThread(*threadGroup);
+    InitScriptCheckQueues(config, *threadGroup);
     m_thread_group = threadGroup;
     m_scheduler = scheduler;
 
