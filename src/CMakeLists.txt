@@ -14,6 +14,13 @@ set(MVCLIGHT_WHITELIST_SOURCES
     light/light_message.cpp
     light/light_state.cpp
     light/light_peer.cpp
+    # ---- Phase 2：布隆过滤器与 Header 链同步 ----
+    light/light_filter.cpp
+    light/light_header.cpp
+    light/light_checkpoints.cpp
+    light/light_chainstore.cpp
+    light/light_validation.cpp
+    light/light_sync.cpp
 )
 
 # ---- 黑名单防回归：白名单中出现以下路径直接 FATAL ----

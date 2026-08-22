@@ -53,6 +53,12 @@ public:
     // 读取并处理一条消息（阻塞，受 socket recv timeout 约束）
     bool ReadAndHandle(const uint8_t magic[4]);
 
+    // 发送任意 P2P 消息（Phase 2+ 供 FILTERLOAD/GETHEADERS 等使用）
+    bool SendMessage(const std::string& command, const std::vector<uint8_t>& payload);
+
+    // 读取一条消息（不自动处理）
+    bool ReadMessage(LightMessage& msg);
+
     // 状态机：仅允许合法迁移
     bool SetState(PeerState state);
     PeerState GetState() const { return m_state; }

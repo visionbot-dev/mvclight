@@ -63,11 +63,9 @@ public:
     void SetHex(const std::string& str) {
         SetNull();
         size_t len = str.size();
-        if (len < 2) return;
         size_t pos = 0;
-        if (str[0] == '0' && (str[1] == 'x' || str[1] == 'X')) pos = 2;
-        size_t hex_len = len - pos;
-        if (hex_len == 0) return;
+        if (len >= 2 && str[0] == '0' && (str[1] == 'x' || str[1] == 'X')) pos = 2;
+        if (len <= pos) return;
         // 从字符串末尾向 data 起始填充（与上游 SetHex 行为一致：大端 hex → 小端内存）
         size_t data_idx = 0;
         size_t str_idx = len;

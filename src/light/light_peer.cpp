@@ -144,7 +144,7 @@ bool CLightPeer::DoHandshake(const uint8_t magic[4], uint32_t recv_timeout_ms) {
     uint64_t remote_services = 0;
     while (!got_version) {
         LightMessage msg;
-        if (!ReadMessage(m_sock, magic, msg)) {
+        if (!mvclight::ReadMessage(m_sock, magic, msg)) {
             return false;
         }
         if (msg.command == "version") {
@@ -174,7 +174,7 @@ bool CLightPeer::DoHandshake(const uint8_t magic[4], uint32_t recv_timeout_ms) {
     bool got_verack = false;
     while (!got_verack) {
         LightMessage msg;
-        if (!ReadMessage(m_sock, magic, msg)) {
+        if (!mvclight::ReadMessage(m_sock, magic, msg)) {
             return false;
         }
         if (msg.command == "verack") {
@@ -259,10 +259,22 @@ bool CLightPeer::HandleMessage(const LightMessage& msg) {
 
 bool CLightPeer::ReadAndHandle(const uint8_t magic[4]) {
     LightMessage msg;
-    if (!ReadMessage(m_sock, magic, msg)) {
+    if (!mvclight::ReadMessage(m_sock, magic, msg)) {
         return false;
     }
     return HandleMessage(msg);
+}
+
+bool CLightPeer::SendMessage(const std::string& command, const std::vector<uint8_t>& payload) {
+    std::vector<uint8_t> msg;
+    if (!EncodeMessage(MainnetMagic(), command, payload, msg)) {
+        return false;
+    }
+    return m_sock.SendAll(msg.data(), msg.size());
+}
+
+bool CLightPeer::ReadMessage(LightMessage& msg) {
+    return mvclight::ReadMessage(m_sock, MainnetMagic(), msg);
 }
 
 bool CLightPeer::SetState(PeerState state) {

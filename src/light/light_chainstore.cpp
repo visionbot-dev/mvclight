@@ -1,0 +1,52 @@
+#include "light/light_chainstore.h"
+
+namespace mvclight {
+
+bool CLightChainStore::AddHeader(const LightBlockHeader& header, int64_t height) {
+    uint256 h = header.GetHash();
+    m_by_height[height] = header;
+    m_by_hash[h] = height;
+    if (height > m_tip_height) {
+        m_tip_height = height;
+    }
+    return true;
+}
+
+bool CLightChainStore::GetHeaderAtHeight(int64_t height, LightBlockHeader& out) const {
+    auto it = m_by_height.find(height);
+    if (it == m_by_height.end()) return false;
+    out = it->second;
+    return true;
+}
+
+bool CLightChainStore::GetHeightByHash(const uint256& hash, int64_t& height) const {
+    auto it = m_by_hash.find(hash);
+    if (it == m_by_hash.end()) return false;
+    height = it->second;
+    return true;
+}
+
+bool CLightChainStore::HasHash(const uint256& hash) const {
+    return m_by_hash.count(hash) != 0;
+}
+
+bool CLightChainStore::GetTip(LightBlockHeader& out) const {
+    return GetHeaderAtHeight(m_tip_height, out);
+}
+
+void CLightChainStore::AddWork() {
+    // 占位：+1；真实公式在 Phase 2 完善（2^256 / (target+1)）
+    uint8_t* p = m_chainwork.begin();
+    for (size_t i = 0; i < m_chainwork.size(); ++i) {
+        if (++p[i] != 0) break;
+    }
+}
+
+void CLightChainStore::Reset() {
+    m_by_height.clear();
+    m_by_hash.clear();
+    m_tip_height = -1;
+    m_chainwork.SetNull();
+}
+
+} // namespace mvclight

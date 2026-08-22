@@ -28,3 +28,18 @@ add_executable(test_phase1 integration/test_phase1.cpp)
 target_include_directories(test_phase1 PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/unit)
 target_link_libraries(test_phase1 PRIVATE mvclight_objects Threads::Threads)
 add_test(NAME test_phase1 COMMAND test_phase1)
+
+# Phase 2 单元测试
+add_executable(test_light_filter unit/test_light_filter.cpp)
+target_link_libraries(test_light_filter PRIVATE mvclight_objects)
+add_test(NAME test_light_filter COMMAND test_light_filter)
+
+add_executable(test_light_validation unit/test_light_validation.cpp)
+target_link_libraries(test_light_validation PRIVATE mvclight_objects)
+add_test(NAME test_light_validation COMMAND test_light_validation)
+
+# Phase 2 集成测试（本地 mock peer 返回 HEADERS）
+add_executable(test_phase2 integration/test_phase2.cpp)
+target_include_directories(test_phase2 PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/unit)
+target_link_libraries(test_phase2 PRIVATE mvclight_objects Threads::Threads)
+add_test(NAME test_phase2 COMMAND test_phase2)
