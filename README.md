@@ -8,7 +8,9 @@ MVC SPV 轻节点 SDK（`libmvclight.{so,dll,dylib}`），基于 BIP-37 布隆�
 
 ## 当前状态
 
-Phase 0（工程环境与构建骨架）实施中。
+- Phase 0 ~ Phase 4：完成（仓库骨架、P2P 状态机、Bloom/Header 同步、MERKLEBLOCK/交易同步、C ABI 业务集成）
+- Phase 5：桌面端加固完成（深重组阈值、畸形数据防护、发布检查）；Android/iOS 移动端交叉编译暂缓
+- 当前共 16 个测试，全部通过
 
 ## 构建
 

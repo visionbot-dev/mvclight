@@ -73,3 +73,9 @@ add_executable(test_phase4 integration/test_phase4.cpp)
 target_include_directories(test_phase4 PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/unit)
 target_link_libraries(test_phase4 PRIVATE mvclight_objects Threads::Threads)
 add_test(NAME test_phase4 COMMAND test_phase4)
+
+# Phase 5 桌面端加固验收（移动端交叉编译暂缓）
+add_executable(test_phase5 integration/test_phase5.cpp)
+target_include_directories(test_phase5 PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/unit)
+target_link_libraries(test_phase5 PRIVATE mvclight_objects)
+add_test(NAME test_phase5 COMMAND test_phase5)
