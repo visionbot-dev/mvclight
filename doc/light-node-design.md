@@ -17,6 +17,7 @@
 | v0.4 | §1.2/1.4/3/4/5/7/8/9/10 | 9 条强制优化 | 内置 Checkpoint、过滤器上限、PendingTxMap 乱序、深重组拒绝、双表存储、store_proof、回调防死锁、Facade 构建、ForkId 脚本 |
 | **v1.0** | **§4.1/4.5/4.6/4.8/5/8/10 + 新增附录 A-E** | 补全工程细节至可编码 | P2P 状态机/心跳/reject/重连;存储 DDL+LevelDB 编码+原子性+磁盘容量;完整错误码/日志/生命周期查询;共识验证边界(header/交易/脚本/难度);CMake 目标+依赖锁定+符号可见性+NDK/iOS 交叉编译;三层测试+异常场景+升级策略 |
 | **v1.1** | §3.1/3.2/3.3/3.4、§4.1.1、§4.1.3、§4.3、§4.5.2、§4.6、§5.1、§7、附录 A、附录 B.1、附录 D.2、附录源码索引 | v1.0 工程审核(6 条强制修复) | ①废弃 txmempool,新增 light_txpool(§4.6/附录 D);②状态机新增 WAIT_FILTER_ACK 防空窗丢消息(§4.1.1);③on_send_result 语义修正 + 120 分钟链上确认超时兜底(§4.1.3);④SQLite txid/block_hash 统一 BLOB 32B(附录 B.1);⑤内置 Checkpoint 增加 nChainWork,历史段跳过难度重算,CPU 降 95%(§4.3/§7);⑥交易大小上限明确 maxTxSize(主网 32MB)/区块 maxBlockSize(4GB),禁用 BTC 100KB(§4.5.2) |
+| **v1.2** | §1.3/1.4/3.1/3.2/3.3/3.4、§9、附录 D.2、新增 §11 | 用户决策:直接集成全节点网络层 | ①网络行为与全节点完全一致(上游 CConnman/PeerLogicValidation/addrman/banman);②过滤改为本地 scriptPubKey 过滤(替代 BIP-37 bloom);③交易同步直接复用上游 mempool/区块下载;④交易入库 LevelDB 后由上游 `-prune` 删除区块文件;⑤黑名单边界改为仅禁 rpc/wallet/mining/zmq/qt/http/init;⑥自研 P2P(light_peer/light_sync/light_connman)降级为 legacy |
 
 ---
 
@@ -41,24 +42,25 @@
 
 ### 1.3 非目标
 
-- 完整区块同步与全链验证(不下载区块体,不做 UTXO 集)
+- ~~完整区块同步与全链验证~~ → **v1.2 起下载完整区块做本地过滤，验证后由 `-prune` 删除区块文件；不保留全量历史区块**
 - 挖矿、出块;内置钱包托管;对外 P2P 区块服务
 - **RPC 服务**(HTTP/JSON-RPC 全部移除,改为库内 API + 回调)
-- 多 peer 并发连接 / 节点自动发现(addrman、DNS 种子)
+- ~~多 peer 并发连接 / 节点自动发现(addrman、DNS 种子)~~ → **v1.2 起作为全节点网络层能力引入(见 §11)**
 
 ### 1.4 设计决策(结论先行)
 
-| 决策点 | 结论 |
+| 决策点 | 结论（v1.2 起） |
 |--------|------|
-| 轻节点协议 | BIP-37 布隆过滤 + 默克尔证明,预留 BIP-157/158 |
-| 网络 | mainnet,直连业务层指定节点(单 peer) |
-| 节点切换 | 单连接状态机 + `switch_peer` + 深重组拒绝(MAX_REORG_DEPTH=144) |
+| 网络层 | **直接集成上游全节点网络层**(`CConnman` + `PeerLogicValidation` + `Addrman` + `Banman`),网络行为与全节点完全一致(见 §11) |
+| 过滤 | **本地 scriptPubKey 过滤**(替代 BIP-37 bloom);复用上游 `base58.h`/`CBitcoinAddress` 解析地址 |
+| 节点切换 | 上游多连接自动管理;`switch_peer` 语义保留(业务层可指定优先节点);深重组拒绝保留 |
 | 信任锚定 | SDK 内置硬编码安全 Checkpoint(约 6 个月前),强制前置验证 |
-| 同步范围 | 仅区块头链 + 过滤交易 |
-| 验证模型 | header 链 PoW + 默克尔根 + 交易基本校验 + ForkId 脚本(可选) |
-| 存储 | 双表(tx_store + addr_tx_index)+ watch_addr_store;Proof 可选持久化;原子事务 |
+| 同步范围 | 区块头链 + 区块体下载(**本地过滤后由 `-prune` 删除区块文件**) |
+| 验证模型 | 上游全节点验证(header/交易/共识)+ 本地 scriptPubKey 过滤 |
+| 存储 | 双表(tx_store + addr_tx_index)+ watch_addr_store(LevelDB/SQLite);区块文件由上游 prune 管理 |
 | 交互形态 | 动态库 + C ABI + 事件回调;回调内严禁调用 SDK API |
-| 配置 | 初始化参数(struct),不使用 conf 文件 |
+| 配置 | 初始化参数(struct)+ 上游 ArgsManager 内部配置;不使用 conf 文件 |
+| 黑名单边界 | 仅禁 `rpc/ wallet/ mining/ zmq/ qt/ http/ init.cpp`;net/validation/txmempool 允许导入 |
 
 ---
 
@@ -94,47 +96,44 @@
 
 ### 3.1 保留模块
 
-| 模块 | 文件 | 说明 |
+| 模块 | 文件 | 说明（v1.2 起） |
 |------|------|------|
-| P2P 通信 | `net/net.cpp`、`netaddress.cpp`、`netbase.cpp`、`protocol.cpp`、`net_message.cpp`、`stream.cpp` | 单连接收发;移除 addrman |
-| 消息处理 | `net/net_processing.cpp` | 仅 TX/INV/GETDATA/HEADERS/GETHEADERS/FILTERLOAD/FILTERADD/FILTERCLEAR/MERKLEBLOCK/PING/PONG/REJECT/VERSION/VERACK |
-| 布隆过滤 | `bloom.cpp/h` | 容量上限封装(§4.2) |
-| 默克尔证明 | `merkleblock.cpp/h`、`consensus/merkle.cpp/h` | ExtractMatches 根校验 |
-| 区块头链 | `primitives/block.cpp/h`、`chain.cpp/h`(精简) | header 索引 + 内置 Checkpoint |
+| P2P 通信/连接管理 | `net/net.cpp`、`net/net.h`、`net/netbase.*`、`net/netaddress.*`、`net/net_message.*`、`net/stream.*`、`net/association.*`、`net/stream_policy*`、`net/block_download_tracker.*`、`net/node_state.*`、`net/validation_scheduler.*` | **完整上游多连接网络层**，与全节点一致 |
+| 消息处理 | `net/net_processing.cpp` | 完整消息处理（HEADERS/INV/GETDATA/BLOCK/TX/PING/PONG 等） |
+| 地址管理 | `addrman.cpp/h`、`chainparamsseeds.h` | 节点发现/持久化（原黑名单，v1.2 起导入） |
+| 封禁管理 | `banman.*`（如存在）/ `net` 内惩罚逻辑 | 与全节点一致 |
+| 区块验证 | `validation.cpp/h`、`validationinterface.*` | 完整区块/交易验证（原黑名单，v1.2 起导入） |
+| 交易池 | `txmempool.cpp/h`、`txn_validation_*` | mempool 交易同步（原黑名单，v1.2 起导入） |
 | 共识参数 | `consensus/params.h`、`consensus/consensus.h`、`chainparams.cpp/h` | mainnet 参数 |
-| 交易校验 | Facade:light_validation(§3.4) | CheckTransactionCommon 等价实现 |
-| **轻量交易池(新增)** | `light/light_txpool.h/.cpp` | **极简内存池**:缓存已广播 txid(防重复)+ 待广播队列;**绝不依赖** CChainState/CoinsView/validation.h;广播直接 `pnode->PushMessage(NetMsgType::TX, tx)`,验证交对端(§4.6) |
-| 脚本(可选) | `script/interpreter.cpp`、`script.h`、`standard.cpp`、`sigcache.cpp`、`mvcconsensus.h` | ForkId 规则(§4.5.2) |
-| 哈希/加密 | `crypto/`、`hash.cpp/h` | — |
-| 椭圆曲线 | `secp256k1/` | 签名校验 |
-| JSON | `univalue/` | C ABI 返回值 |
-| 存储 | `dbwrapper.cpp/h`、`leveldb/`(桌面) | 双表实现之一 |
-| 基础 | `util/`、`support/`、`logging`、`random`、`fs`、`sync`、`threadinterrupt`、`tinyformat`、`streams.h`、`serialize.h`、`version.h` | 全局依赖 |
+| 本地过滤(新增) | `light/light_local_filter.h/.cpp` | watch 地址→scriptPubKey；订阅 `BlockConnected`/`TransactionAddedToMempool` 本地过滤 |
+| 存储 | `dbwrapper.cpp/h`、`leveldb/`(桌面) | 双表 tx_store + addr_tx_index；区块文件由上游 `-prune` 管理 |
+| 哈希/加密/基础 | `crypto/`、`hash.cpp/h`、`util/`、`support/`、`logging`、`random`、`fs`、`sync`、`streams.h`、`serialize.h`、`version.h` | 全局依赖 |
+| 轻量广播池(legacy) | `light/light_txpool.h/.cpp` | 保留为广播兜底/旧接口兼容，v1.2 后主路径走上游 mempool |
 
 ### 3.2 移除/简化模块
 
-`rpc/` 全部、addrman/DNS 种子、`validation.cpp` 区块体验证/UTXO/txdb、区块下载传播、`mining/`、`wallet/`、`zmq/`、双花检测、区块文件存储、safe_mode/warnings、**`txmempool.cpp/h`、`mempooltxdb.cpp`(由 light_txpool 替代,避免 validation/UTXO 依赖链)**、httprpc/httpserver、多连接管理。
+v1.2 起只移除：`rpc/` 全部、`wallet/`、`mining/`、`zmq/`、`qt/`、`http/`、`init.cpp`（不启动完整节点进程）。`validation.cpp`、`txmempool.cpp`、`addrman`、多连接管理由“移除”改为“导入”。旧自研 `light_peer/light_sync/light_connman` 标记 legacy，逐步下线。
 
 ### 3.3 依赖关系
 
 ```
-连接管理 ─┬─ net(单连接) ── 心跳/重连/状态机
-         ├─ bloom(过滤器)
-         ├─ merkleblock ── consensus/merkle
-         ├─ header 链(chain) ── chainparams + 内置Checkpoint
-         ├─ script ── secp256k1(ForkId,可选)
-         └─ light_txpool(广播队列) ──► pnode->PushMessage(TX) + reject 兜底
+mvc_core(上游网络内核) ── CConnman/PeerLogicValidation/Addrman/Banman
+                     ├─ validation ── txmempool ── chainparams/consensus
+                     ├─ net/stream_policy(限流)
+                     └─ Boost / libevent / LevelDB / secp256k1 / univalue
 
-CWatchTxStore ── 存储抽象(LevelDB/SQLite)+ 原子事务 + 磁盘容量
-SDK API 层 ── 连接管理 + CWatchTxStore + 错误码/日志/回调分发
+src/light ── light_local_filter(订阅 CValidationInterface)
+           ── CWatchTxStore(LevelDB/SQLite 双表)
+           ── light_api(C ABI facade)
 ```
 
-### 3.4 构建策略:Facade 隔离编译
+### 3.4 构建策略:上游内核静态库 + Facade
 
-- 新建 `src/light/` 目录:`light_validation`、`light_merkle`、`light_watchstore`、`light_filter`、`light_peer`、`light_checkpoints`、`light_txpool`、`light_api`;
-- 链接仅含 `src/light/*.o` + `net/`(精简)+ `crypto/` + `secp256k1/` + `script/`(所需)+ `leveldb/` + `univalue/`;
-- **完全排除** `validation.cpp` 区块体逻辑、`mining/`、`wallet/`、`rpc/`、`zmq/`、`qt/`;
-- 收益:升级冲突面最小、二进制体积最小(见附录 D)。
+- 新增 `third_party/microvisionchain/`(vendored 只读副本)与 `mvc_core` 静态库；
+- `mvc_core` 编译：`src/net/*`、`src/validation.*`、`src/txmempool.*`、`src/addrman.*`、`src/chainparams.*`、`src/protocol.*`、`src/consensus/*`、`src/crypto/*`、`src/util/*`、`src/dbwrapper.*` 及依赖；
+- `src/light/` 只编译 facade、本地过滤、存储、C ABI；
+- **排除**：`rpc/ wallet/ mining/ zmq/ qt/ http/ init.cpp`；
+- 符号可见性：`mvc_core` 内部符号隐藏，`mvclight` SHARED 仅导出 `mvc_light_*`(附录 D)。
 
 ---
 
@@ -492,12 +491,16 @@ static const LightCheckpoint kBuiltinCheckpoints[] = {
 
 ## 9. 分阶段实施计划
 
+> v1.2 起以“直接集成全节点网络层”为主线；旧自研 P2P 阶段（light_peer/light_sync/light_connman）降级为 legacy。
+
 | 阶段 | 内容 | 验收标准 |
 |------|------|---------|
-| P1 核心链路(桌面) | src/light Facade、P2P 状态机骨架、MERKLEBLOCK+PendingTxMap、双表存储、内置 Checkpoint、C ABI 骨架 | 单 peer 直连 testnet 私有节点,关注交易可同步/落库/查询(单元+集成测试通过) |
-| P2 健壮性 | switch_peer 深重组拒绝、心跳/reject/重连、过滤器上限、30s 重传、错误码/日志/on_send_result | 断连自动重连;reject 正确回调;深重组拒绝 |
-| P3 指定高度 | start_height + Checkpoint 前置逻辑 + 信任边界暴露 | 任意高度起步且防投毒 |
-| P4 移动端化 | SQLite 双表、Android/iOS 交叉编译(附录 D)、线程契约验证、体积优化 | 双端 SDK 通过端到端测试 |
+| A 依赖与底座 | vcpkg 安装 Boost/libevent；vendor `third_party/microvisionchain`；`mvc_core` 静态库编译（net/validation/txmempool/addrman/chainparams/consensus） | Windows+MSVC 构建 0 error；空壳可初始化 chainparams |
+| B 网络内核启动 | 封装 `light_nodecore`：启动 `CConnman`/`PeerLogicValidation`/`CTxMemPool`，接入种子与 addrman | 主网 **≥2 条连接稳定保持 5 分钟**，网络行为与全节点一致 |
+| C 本地过滤+存储+Prune | `light_local_filter` 订阅 `BlockConnected`/`TransactionAddedToMempool`；交易写 LevelDB 双表；启用 `-prune` | watch 地址新交易自动入库；区块文件删除后交易仍可查；历史高度 185136 用例通过 |
+| D C ABI 适配 | `mvc_light_*` 基于 `CLightNodeCore`；watch_add/remove、get_tx_list、send_raw_tx 走上游 | 现有 C ABI 测试全绿；回调语义不变 |
+| E Demo+测试 | Demo 改用新内核；集成测试（长连接/本地过滤/prune） | 全部测试通过；check_blacklist/check_symbols 更新并通过 |
+| F 移动端化(可选) | SQLite 后端、Android/iOS 交叉编译 | 双端 SDK 端到端通过 |
 
 ---
 
@@ -514,9 +517,69 @@ mvc_light_config cfg = {
 };
 ```
 
-- 主网 P2P 端口 9883(testnet 19883);单节点直连;
+- 主网 P2P 端口 9883(testnet 19883);v1.2 起由上游 CConnman 多连接管理,不再单节点直连;
 - 内置 Checkpoint 硬编码,无需配置;store_proof 仅举证场景开启;
 - 日志:未注册 on_log 时默认静默(内部仍记录到内存环形缓冲,可用 `sync_status` 导出最近 N 条)。
+
+---
+
+## 11. 全节点网络层集成方案(v1.2)
+
+### 11.1 动机
+
+自研单连接 P2P 在公共种子上频繁被断开、历史回扫受节点 `OutboundTargetReached` 限制。用户决策:直接使用 MVC 全节点网络层,使网络行为与全节点完全一致。
+
+### 11.2 导入范围
+
+| 类别 | 文件 |
+|------|------|
+| 连接/消息 | `src/net/*`(net/net_processing/netbase/netaddress/net_message/stream/stream_policy/association/block_download_tracker/node_state/validation_scheduler) |
+| 地址/封禁 | `src/addrman.*`、banman/惩罚逻辑 |
+| 验证/交易池 | `src/validation.*`、`src/validationinterface.*`、`src/txmempool.*`、`src/txn_validation_*` |
+| 参数/协议 | `src/chainparams.*`、`src/chainparamsbase.*`、`src/chainparamsseeds.h`、`src/protocol.*` |
+| 共识/基础 | `src/consensus/*`、`src/uint256.*`、`src/arith_uint256.*`、`src/crypto/*`、`src/util/*`、`src/primitives/*`、`src/dbwrapper.*` |
+| 依赖 | Boost(signals2/filesystem/thread)、libevent、LevelDB、secp256k1、univalue(vcpkg/vendored) |
+
+### 11.3 本地过滤与存储
+
+- `CLightLocalFilter`(src/light/light_local_filter.h/.cpp):
+  - watch 地址 → scriptPubKey(复用上游 `CBitcoinAddress`)
+  - 实现 `CValidationInterface`:
+    - `BlockConnected` → 遍历区块交易输出,匹配 scriptPubKey
+    - `TransactionAddedToMempool` → 匹配 mempool 新交易
+  - 命中 → 写 `CLightWatchStore`(LevelDB 双表 tx_store + addr_tx_index)
+- 区块文件:启用 `-prune=550`(或更大),上游验证后自动删除已处理区块文件,满足“交易入库后再删区块文件”。
+
+### 11.4 构建形态
+
+```
+third_party/microvisionchain/  (vendored 只读)
+        └─ mvc_core 静态库 (net/validation/txmempool/addrman/...)
+src/light/                     (facade + light_local_filter + CWatchTxStore + C ABI)
+        └─ mvclight SHARED (仅导出 mvc_light_*)
+```
+
+### 11.5 黑名单边界(更新)
+
+- 允许:net/validation/txmempool/addrman/chainparams/consensus
+- 仍禁:`rpc/`、`wallet/`、`mining/`、`zmq/`、`qt/`、`http/`、`init.cpp`
+
+### 11.6 验收(DoD)
+
+- 主网 ≥2 条连接稳定 5 分钟,网络行为与全节点一致
+- watch 地址交易(新区块 + mempool)自动入库 LevelDB
+- 历史用例:`1J3NjfS7eYTddzina6s4bddvEwu4W8UUwc` 高度 185136 交易自动出现
+- prune 后区块文件删除,交易仍可查询
+- `check_blacklist.py` 更新并通过;符号仍只导出 `mvc_light_*`
+
+### 11.7 风险
+
+| 风险 | 对策 |
+|------|------|
+| Boost/libevent 依赖 | vcpkg 固定版本 |
+| 符号冲突 | mvc_core 内部符号隐藏,独立命名空间 |
+| 与 init.cpp 耦合 | light_nodecore 只提取网络+验证子流程 |
+| 全量验证资源 | `-dbcache` 控制 + prune 限制磁盘 |
 
 ---
 
@@ -676,32 +739,36 @@ typedef enum mvc_light_error {
 | univalue | **vendored**(`src/univalue/`) | 仓库自带 |
 | C++ 标准 | C++17 | — |
 
-### D.2 CMake 目标(白名单模式)
+### D.2 CMake 目标(上游内核 + Facade, v1.2)
 
 ```cmake
-# src/CMakeLists.txt(新增)
+# third_party/microvisionchain/CMakeLists.txt(新增)
+add_library(mvc_core STATIC
+    src/net/net.cpp src/net/net_processing.cpp
+    src/net/netbase.cpp src/net/netaddress.cpp src/net/net_message.cpp
+    src/net/stream.cpp src/net/stream_policy.cpp src/net/stream_policy_factory.cpp
+    src/net/association.cpp src/net/association_id.cpp
+    src/net/block_download_tracker.cpp src/net/node_state.cpp
+    src/net/validation_scheduler.cpp
+    src/addrman.cpp src/validation.cpp src/validationinterface.cpp
+    src/txmempool.cpp src/txn_validation_data.cpp src/txmempoolevictioncandidates.cpp
+    src/chainparams.cpp src/chainparamsbase.cpp src/protocol.cpp
+    src/consensus/*.cpp src/crypto/*.cpp src/hash.cpp src/dbwrapper.cpp
+    src/util/*.cpp src/primitives/*.cpp
+)
+target_link_libraries(mvc_core PUBLIC secp256k1 leveldb univalue ${Boost_LIBRARIES} ${OPENSSL_LIBS} ${EVENT_LIBS})
+
+# src/CMakeLists.txt(改)
 add_library(mvclight SHARED
     light/light_api.cpp
-    light/light_validation.cpp
-    light/light_merkle.cpp
+    light/light_local_filter.cpp       # 本地 scriptPubKey 过滤(替代 bloom)
     light/light_watchstore.cpp
-    light/light_filter.cpp
-    light/light_peer.cpp
-    light/light_checkpoints.cpp
-    light/light_txpool.cpp            # 轻量广播池(替代 txmempool.cpp)
-    net/net.cpp net/netaddress.cpp net/netbase.cpp net/protocol.cpp
-    net/net_message.cpp net/stream.cpp
-    bloom.cpp merkleblock.cpp consensus/merkle.cpp
-    script/interpreter.cpp script/script.cpp script/standard.cpp script/sigcache.cpp
-    dbwrapper.cpp
-    crypto/*.cpp hash.cpp
-    util/*.cpp
+    light/light_nodecore.cpp           # 封装 CConnman/PeerLogicValidation 启动
 )
-target_include_directories(mvclight PRIVATE ...)
-target_link_libraries(mvclight PRIVATE secp256k1 leveldb univalue ${Boost_LIBRARIES} ${OPENSSL_LIBS} ${EVENT_LIBS})
-# 明确排除:不 add_subdirectory(rpc) / (wallet) / (mining) / (zmq)
-# 不编译 validation.cpp 中的区块体/UTXO 逻辑(使用 src/light/light_validation.cpp 代替)
-# 不编译 txmempool.cpp / mempooltxdb.cpp(深度依赖 validation.h/CoinsView,会导致链接失败)
+target_link_libraries(mvclight PRIVATE mvc_core)
+# 明确排除:不 add_subdirectory(rpc) / (wallet) / (mining) / (zmq) / (qt) / (http)
+# 不链接 init.cpp(不启动完整节点进程)
+# 旧自研 light_peer/light_sync/light_connman 保留为 legacy,不进新内核链接
 ```
 
 ### D.3 符号可见性控制
