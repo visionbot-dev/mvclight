@@ -73,6 +73,21 @@ if(MVCLIGHT_VENDOR_LEVELDB)
     target_link_libraries(mvclight_objects PUBLIC leveldb)
 endif()
 
+# 上游网络内核封装（Phase B 骨架；仅 BUILD_MVC_LIGHT_UPSTREAM_CORE=ON 时构建）
+if(BUILD_MVC_LIGHT_UPSTREAM_CORE)
+    add_library(mvclight_nodecore STATIC light/light_nodecore.cpp)
+    target_include_directories(mvclight_nodecore PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}
+        ${CMAKE_CURRENT_SOURCE_DIR}/../third_party/microvisionchain/src
+        ${CMAKE_CURRENT_SOURCE_DIR}/../third_party/microvisionchain/src/leveldb/include
+        ${CMAKE_CURRENT_SOURCE_DIR}/../third_party/microvisionchain/src/secp256k1/include
+        ${CMAKE_CURRENT_SOURCE_DIR}/../third_party/microvisionchain/src/univalue/include
+        "${BOOST_ROOT_CACHE}"
+        "${OPENSSL_ROOT_CACHE}/include"
+    )
+    target_link_libraries(mvclight_nodecore PUBLIC mvc_core)
+endif()
+
 # 动态库：仅导出 mvc_light_*（符号可见性控制）
 add_library(mvclight SHARED $<TARGET_OBJECTS:mvclight_objects>)
 
