@@ -494,6 +494,84 @@ void HandleTxMessage(const LightMessage& msg) {
     AppendLog(g_state, "[tx] received " + txid.GetHex());
 }
 
+// 提交 Backfill 命中的交易（全块本地过滤路径）
+void CommitBackfillTx(const uint256& txid, int64_t height, const uint256& block_hash) {
+    std::vector<std::string> addrs;
+    {
+        std::lock_guard<std::mutex> lock(g_state.mu);
+        addrs = g_state.watch_addresses;
+    }
+    if (addrs.empty()) return;
+    TxRecord rec;
+    rec.txid = txid;
+    rec.height = height;
+    rec.block_hash = block_hash;
+    rec.script_verified = true;
+    for (const auto& a : addrs) {
+        g_store.CommitTx(a, rec);
+    }
+    AppendLog(g_state, "[backfill] matched+stored " + txid.GetHex() +
+              " height=" + std::to_string(height));
+    RefreshTxList();
+}
+
+// 解析完整区块，本地按 watch scriptPubKey 过滤输出脚本
+bool ParseBlockAndMatch(const std::vector<uint8_t>& block, int64_t height,
+                        const uint256& block_hash,
+                        const std::vector<std::vector<uint8_t>>& watch_spks,
+                        size_t& matched_count) {
+    const uint8_t* p = block.data();
+    const uint8_t* end = p + block.size();
+    if (end - p < 80 + 1) return false;
+    p += 80; // 区块头
+    bool ok = true;
+    uint64_t ntx = ReadCompactSize(p, end, ok);
+    if (!ok) return false;
+    matched_count = 0;
+    for (uint64_t t = 0; t < ntx; ++t) {
+        const uint8_t* tx_start = p;
+        if (p + 4 > end) return false;
+        p += 4; // version
+        uint64_t vin = ReadCompactSize(p, end, ok);
+        if (!ok) return false;
+        for (uint64_t i = 0; i < vin; ++i) {
+            if (p + 36 > end) return false;
+            p += 36; // prevout
+            uint64_t slen = ReadCompactSize(p, end, ok);
+            if (!ok || p + slen + 4 > end) return false;
+            p += slen + 4; // scriptSig + sequence
+        }
+        uint64_t vout = ReadCompactSize(p, end, ok);
+        if (!ok) return false;
+        bool matched_tx = false;
+        for (uint64_t i = 0; i < vout; ++i) {
+            if (p + 8 > end) return false;
+            p += 8; // value
+            uint64_t slen = ReadCompactSize(p, end, ok);
+            if (!ok || p + slen > end) return false;
+            if (!matched_tx) {
+                for (const auto& spk : watch_spks) {
+                    if (spk.size() == slen && std::memcmp(spk.data(), p, slen) == 0) {
+                        matched_tx = true;
+                        break;
+                    }
+                }
+            }
+            p += slen;
+        }
+        if (p + 4 > end) return false;
+        p += 4; // locktime
+        if (matched_tx) {
+            uint256 txid;
+            if (ParseTxid(tx_start, static_cast<size_t>(p - tx_start), txid)) {
+                CommitBackfillTx(txid, height, block_hash);
+                ++matched_count;
+            }
+        }
+    }
+    return true;
+}
+
 // 核心同步逻辑（GUI 工作线程与 --selftest 共用）
 bool RunSyncCore(const std::string& host, int port, std::string& err_out,
                  bool wait_for_txs) {
@@ -778,20 +856,36 @@ void WorkerMain(const std::string& host, int port) {
     if (g_hwnd) PostMessage(g_hwnd, WM_APP_STATE, 0, 0);
 }
 
-// P2P 回扫最近 N 块：独立临时连接，逐块 getdata(MSG_FILTERED_BLOCK)
+// P2P 回扫最近 N 块：独立临时连接，逐块 getdata(MSG_BLOCK) + 本地过滤
 void BackfillWorker(const std::string& host, int port, int n_blocks) {
     g_backfill_running = true;
     AppendLog(g_state, "[backfill] start last " + std::to_string(n_blocks) + " blocks");
 
     CLightPeer peer;
-    if (!peer.ConnectAndHandshake(host, port, 10000, 1000)) {
+    if (!peer.ConnectAndHandshake(host, port, 10000, 3000)) {
         AppendLog(g_state, "[backfill] connect/handshake failed");
         g_backfill_running = false;
         return;
     }
 
-    // 回扫需要过滤器命中，先按当前 watch 地址重建（独立连接强制发送，不受限速影响）
-    RebuildFilter(peer, true);
+    // 计算 watch scriptPubKey（本地过滤用）
+    std::vector<std::vector<uint8_t>> watch_spks;
+    {
+        std::lock_guard<std::mutex> lock(g_state.mu);
+        for (const auto& a : g_state.watch_addresses) {
+            std::vector<uint8_t> spk;
+            if (AddressToScriptPubKey(a, spk)) {
+                watch_spks.push_back(spk);
+            } else {
+                AppendLog(g_state, "[backfill] unsupported address: " + a);
+            }
+        }
+    }
+    if (watch_spks.empty()) {
+        AppendLog(g_state, "[backfill] no valid watch scriptPubKey");
+        g_backfill_running = false;
+        return;
+    }
 
     int64_t tip = g_chain.TipHeight();
     int scanned = 0;
@@ -802,42 +896,46 @@ void BackfillWorker(const std::string& host, int port, int n_blocks) {
 
         std::vector<uint8_t> payload;
         AppendCompactSize(payload, 1);
-        AppendLE32(payload, 3); // MSG_FILTERED_BLOCK
+        AppendLE32(payload, 2); // MSG_BLOCK（全块下载，避开 filtered-block 服务上限断开）
         const uint256& blk = hdr.GetHash();
         payload.insert(payload.end(), blk.begin(), blk.end());
-        if (!(peer.SendMessage)("getdata", payload)) break;
+        if (!(peer.SendMessage)("getdata", payload)) {
+            AppendLog(g_state, "[backfill] send failed (node disconnected)");
+            break;
+        }
 
-        // 读取 merkleblock + 全部后续 tx（按匹配数收齐，避免漏交易）
-        bool got_mb = false;
-        size_t tx_received = 0;
-        size_t matched_count = 0;
+        // 读取 block 消息并本地过滤
+        bool got_block = false;
         for (int attempt = 0; attempt < 20; ++attempt) {
             LightMessage msg;
             if (!peer.ReadMessage(msg)) {
                 if (!peer.IsConnected()) {
-                    AppendLog(g_state, "[backfill] disconnected");
+                    AppendLog(g_state, "[backfill] disconnected at height " +
+                              std::to_string(h));
                     g_backfill_running = false;
                     return;
                 }
-                break; // 超时：本块结束
+                break; // 超时
             }
-            if (msg.command == "merkleblock") {
-                matched_count = HandleMerkleBlock(msg, g_chain);
-                got_mb = true;
-                if (matched_count == 0) break; // 无匹配，无需等 tx
-            } else if (msg.command == "tx") {
-                HandleTxMessage(msg);
-                ++tx_received;
+            if (msg.command == "block") {
+                size_t matched_count = 0;
+                ParseBlockAndMatch(msg.payload, h, blk, watch_spks, matched_count);
+                if (matched_count > 0) {
+                    AppendLog(g_state, "[backfill] height=" + std::to_string(h) +
+                              " matched=" + std::to_string(matched_count));
+                }
+                got_block = true;
+                break;
             } else if (msg.command == "ping") {
                 (peer.SendMessage)("pong", msg.payload);
+            } else if (msg.command == "merkleblock") {
+                // 兼容：若节点仍回 filtered block，也解析
+                HandleMerkleBlock(msg, g_chain);
+                got_block = true;
+                break;
             }
-            if (got_mb && tx_received >= matched_count) break;
         }
-        if (matched_count > 0) {
-            AppendLog(g_state, "[backfill] height=" + std::to_string(h) +
-                      " matched=" + std::to_string(matched_count) +
-                      " tx_received=" + std::to_string(tx_received));
-        }
+        if (!got_block) break;
 
         ++scanned;
         if (scanned % 10 == 0 || i == n_blocks - 1) {
