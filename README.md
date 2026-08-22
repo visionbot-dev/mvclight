@@ -10,20 +10,54 @@ MVC SPV 轻节点 SDK（`libmvclight.{so,dll,dylib}`），基于 BIP-37 布隆�
 
 - Phase 0 ~ Phase 4：完成（仓库骨架、P2P 状态机、Bloom/Header 同步、MERKLEBLOCK/交易同步、C ABI 业务集成）
 - Phase 5：桌面端加固完成（深重组阈值、畸形数据防护、发布检查、真实 MTP）；**Android/iOS 移动端交叉编译已按用户决定移出当前范围**
+- Windows 桌面可视化 Demo（`demo/`）已可用，可直连真实主网体验 Header 同步 / Checkpoint / Watch 地址
 - 当前共 19 个测试，全部通过
 
 ## 构建
 
 ```bash
-cmake -S . -B build -DBUILD_MVC_LIGHT=ON
+cmake -S . -B build -DBUILD_MVC_LIGHT=ON -DBUILD_MVC_LIGHT_DEMO=ON
 cmake --build build --target mvclight -j
+cmake --build build --target mvclight_demo -j
 ctest --test-dir build --output-on-failure
 ```
+
+## Windows 桌面 Demo
+
+`demo/` 目录提供 Win32 原生桌面可视化 Demo（无 Web 前端、无第三方 GUI）。
+
+### 构建
+
+```bash
+cmake -S . -B build -DBUILD_MVC_LIGHT_DEMO=ON
+cmake --build build --target mvclight_demo --config Debug
+```
+
+产物：`build/demo/Debug/demo_mvclight.exe`
+
+### 使用
+
+1. 双击运行 `demo_mvclight.exe`
+2. 默认连接真实主网种子 `47.242.24.63:9883`（可在顶部编辑框修改）
+3. 点击 **Connect**：显示握手状态、Header 同步进度、最新区块哈希、Checkpoint 锚定状态
+4. 在 **Watch address** 输入地址后点击 **Add**：地址进入 watch 列表，并产生一条演示交易入库展示
+5. 点击 **Remove** 删除选中地址；**Reset** 重置链状态；**Clear Log** 清空日志
+6. 点击 **Disconnect** 停止同步
+
+### 自检模式
+
+```bash
+cd build/demo/Debug
+./demo_mvclight.exe --selftest
+```
+
+成功时当前目录生成 `demo_selftest.log`，内容包含 `VISUAL_DEMO_READY`（会真实连接主网种子并同步至 Checkpoint 高度 21256）。
 
 ## 目录结构
 
 ```text
 src/light/      自研 SDK 代码（C ABI、light_txpool、后续 P2P/存储模块）
 src/tests/      单元/集成/端到端测试与 CI 脚本
+demo/           Windows 原生桌面可视化 Demo
 third_party/    vendored 依赖与上游 patch
 ```
