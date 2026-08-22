@@ -32,6 +32,7 @@ Testing/
 
 # Runtime storage
 store/
+store_test_*/
 *.db
 *.db-wal
 *.db-shm

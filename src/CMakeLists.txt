@@ -62,6 +62,10 @@ else()
     target_compile_options(mvclight_objects PRIVATE -Wall -Wextra -fvisibility=hidden)
 endif()
 
+if(MVCLIGHT_VENDOR_LEVELDB)
+    target_link_libraries(mvclight_objects PUBLIC leveldb)
+endif()
+
 # 动态库：仅导出 mvc_light_*（符号可见性控制）
 add_library(mvclight SHARED $<TARGET_OBJECTS:mvclight_objects>)
 
@@ -76,6 +80,10 @@ target_include_directories(mvclight
 
 if(WIN32)
     target_link_libraries(mvclight PRIVATE ws2_32)
+endif()
+
+if(MVCLIGHT_VENDOR_LEVELDB)
+    target_link_libraries(mvclight PRIVATE leveldb)
 endif()
 
 set_target_properties(mvclight PROPERTIES

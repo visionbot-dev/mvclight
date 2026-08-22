@@ -55,6 +55,18 @@
       "source": "hash.cpp",
       "dest": "src/hash.cpp",
       "status": "pending"
+    },
+    {
+      "source": "leveldb/CMakeLists.txt",
+      "dest": "third_party/leveldb/CMakeLists.txt",
+      "status": "imported",
+      "patch": "leveldb-shlwapi.patch",
+      "note": "Windows 下直接链接 shlwapi，替代 find_package(SHLWAPI)"
+    },
+    {
+      "source": "leveldb/include/leveldb/db.h",
+      "dest": "third_party/leveldb/include/leveldb/db.h",
+      "status": "imported"
     }
   ]
 }

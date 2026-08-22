@@ -12,6 +12,12 @@ endif()
 
 option(BUILD_MVC_LIGHT "Build mvclight SDK" ON)
 option(BUILD_MVC_LIGHT_TESTS "Build mvclight tests" ON)
+option(MVCLIGHT_VENDOR_LEVELDB "Build vendored LevelDB for desktop persistence" ON)
+
+if(MVCLIGHT_VENDOR_LEVELDB)
+    set(LEVELDB_BUILD_TESTS OFF CACHE BOOL "" FORCE)
+    add_subdirectory(third_party/leveldb)
+endif()
 
 if(BUILD_MVC_LIGHT)
     add_subdirectory(src)

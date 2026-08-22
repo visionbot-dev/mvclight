@@ -57,6 +57,10 @@ add_executable(test_light_watchstore unit/test_light_watchstore.cpp)
 target_link_libraries(test_light_watchstore PRIVATE mvclight_objects)
 add_test(NAME test_light_watchstore COMMAND test_light_watchstore)
 
+add_executable(test_light_watchstore_leveldb unit/test_light_watchstore_leveldb.cpp)
+target_link_libraries(test_light_watchstore_leveldb PRIVATE mvclight_objects)
+add_test(NAME test_light_watchstore_leveldb COMMAND test_light_watchstore_leveldb)
+
 # Phase 3 集成测试（配对 + 原子存储 + 篡改拒绝）
 add_executable(test_phase3 integration/test_phase3.cpp)
 target_include_directories(test_phase3 PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/unit)

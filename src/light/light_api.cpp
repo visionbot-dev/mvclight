@@ -102,6 +102,16 @@ mvc_light_ctx* mvc_light_init(const mvc_light_config* cfg) {
     ctx->impl.peer = cfg->peer;
     ctx->impl.store_path = cfg->store_path;
     ctx->impl.callbacks = *cfg;
+
+    // 桌面端：打开 LevelDB 持久化（失败返回 ERR_STORE_OPEN_FAILED 语义）
+    if (!ctx->impl.store.Open(ctx->impl.store_path)) {
+        if (cfg->on_log != nullptr) {
+            cfg->on_log(cfg->user_data, MVC_LIGHT_LOG_ERROR,
+                        "mvc_light_init: failed to open LevelDB store");
+        }
+        delete ctx;
+        return nullptr;
+    }
     return ctx;
 }
 
@@ -242,7 +252,7 @@ char* mvc_light_sync_status(mvc_light_ctx* ctx) {
 
 int mvc_light_force_reset_chain(mvc_light_ctx* ctx) {
     if (ctx == nullptr) return MVC_LIGHT_ERR_PARAM_INVALID;
-    ctx->impl.store = mvclight::CLightWatchStore();
+    ctx->impl.store.ClearMemory();
     return MVC_LIGHT_OK;
 }
 
