@@ -74,6 +74,16 @@ constexpr int kMaxBatches = 1024;
 constexpr int kCheckpointHeight = 21256;
 constexpr const char* kDefaultPeer = "47.242.24.63:9883";
 
+// 备用种子：主种子断开后自动轮换，保证新交易同步不中断
+constexpr const char* kSeedPeers[] = {
+    "47.242.24.63:9883",
+    "47.245.138.101:9883",
+    "8.217.120.15:9883",
+    "seed1.microvisionchain.com:9883",
+    "seed2.microvisionchain.com:9883",
+};
+constexpr size_t kSeedPeersCount = sizeof(kSeedPeers) / sizeof(kSeedPeers[0]);
+
 // ---- 控件 ID ----
 constexpr int IDC_PEER_EDIT = 101;
 constexpr int IDC_CONNECT_BTN = 102;
@@ -832,21 +842,24 @@ bool RunSyncCore(const std::string& host, int port, std::string& err_out,
 
 void WorkerMain(const std::string& host, int port) {
     g_worker_running = true;
-    int attempt = 0;
+    // 首选 UI 配置的 peer，断开后自动轮换备用种子
+    std::vector<std::string> peers;
+    peers.push_back(host + ":" + std::to_string(port));
+    for (size_t i = 0; i < kSeedPeersCount; ++i) peers.push_back(kSeedPeers[i]);
+
+    size_t idx = 0;
     while (!g_stop.load()) {
+        std::string ph;
+        int pp = 0;
+        SplitHostPort(peers[idx % peers.size()], ph, pp);
+        AppendLog(g_state, "[sync] connecting to " + peers[idx % peers.size()]);
         std::string err;
-        RunSyncCore(host, port, err, true);
+        RunSyncCore(ph, pp, err, true);
         if (g_stop.load()) break;
-        // 连接被节点断开：指数退避后自动重连（断点续传，不重头拉）
-        int64_t delay_ms = 5000;
-        if (attempt < 10) {
-            delay_ms = std::min<int64_t>(5000 * (1LL << attempt), 60000);
-        }
-        ++attempt;
-        AppendLog(g_state, "[sync] connection lost, reconnect in " +
-                  std::to_string(delay_ms / 1000) + "s (attempt " +
-                  std::to_string(attempt) + "): " + err);
-        for (int64_t i = 0; i < delay_ms / 100 && !g_stop.load(); ++i) {
+        // 2 秒后换下一个种子，保证新交易同步尽量不中断
+        idx = (idx + 1) % peers.size();
+        AppendLog(g_state, "[sync] lost (" + err + "), switch peer in 2s");
+        for (int i = 0; i < 20 && !g_stop.load(); ++i) {
             std::this_thread::sleep_for(std::chrono::milliseconds(100));
         }
     }
