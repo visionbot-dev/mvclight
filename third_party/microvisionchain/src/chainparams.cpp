@@ -1,0 +1,465 @@
+// Copyright (c) 2009-2010 Satoshi Nakamoto
+// Copyright (c) 2009-2022 The Bitcoin Core developers
+// Copyright (c) 2021-2024 The MVC developers
+// Distributed under the MIT software license, see the accompanying
+// file COPYING or http://www.opensource.org/licenses/mit-license.php.
+
+#include "chainparams.h"
+#include "consensus/merkle.h"
+
+#include "policy/policy.h"
+#include "script/script_num.h"
+
+#include "tinyformat.h"
+#include "util.h"
+#include "utilstrencodings.h"
+
+#include <cassert>
+
+#include "chainparamsseeds.h"
+
+#define GENESIS_ACTIVATION_MAIN                 1
+#define GENESIS_ACTIVATION_TESTNET              1
+
+static CBlock CreateGenesisBlock(const char *pszTimestamp,
+                                 const CScript &genesisOutputScript,
+                                 uint32_t nTime, uint32_t nNonce,
+                                 uint32_t nBits, int32_t nVersion,
+                                 const Amount genesisReward,
+                                 bool isTestNet) {
+    CMutableTransaction txNew;
+    txNew.nVersion = 1;
+    txNew.vin.resize(1);
+    txNew.vout.resize(1);
+    txNew.vin[0].scriptSig =
+        CScript() << 486604799 << CScriptNum(4)
+                  << std::vector<uint8_t>((const uint8_t *)pszTimestamp,
+                                          (const uint8_t *)pszTimestamp +
+                                              strlen(pszTimestamp));
+    txNew.vout[0].nValue = genesisReward;
+    txNew.vout[0].scriptPubKey = genesisOutputScript;
+
+    CBlock genesis;
+    genesis.nTime = nTime;
+    genesis.nBits = nBits;
+    genesis.nNonce = nNonce;
+    genesis.nVersion = nVersion;
+    genesis.vtx.push_back(MakeTransactionRef(std::move(txNew)));
+#if CHAIN_GENERATION_WITH_HARDCODED_GENESIS
+    if (isTestNet) {
+#endif
+        genesis.hashPrevBlock.SetNull();
+        genesis.hashMerkleRoot = BlockMerkleRoot(genesis);
+#if CHAIN_GENERATION_WITH_HARDCODED_GENESIS
+    } else {
+        genesis.hashPrevBlock.SetHex("00000000000000000102d94fde9bd0807a2cc7582fe85dd6349b73ce4e8d9322");
+        genesis.hashMerkleRoot.SetHex("da2b9eb7e8a3619734a17b55c47bdd6fd855b0afa9c7e14e3a164a279e51bba9");
+    }
+#endif
+    return genesis;
+}
+
+/**
+ * Build the genesis block. Note that the output of its generation transaction
+ * cannot be spent since it did not originally exist in the database.
+ */
+static CBlock CreateGenesisBlock(uint32_t nTime, uint32_t nNonce,
+                                 uint32_t nBits, int32_t nVersion,
+                                 const Amount genesisReward,
+                                 bool isTestNet) {
+    const char *pszTimestamp =
+        "Nothing to say";
+    const CScript genesisOutputScript =
+        CScript() << ParseHex("04678afdb0fe5548271967f1a67130b7105cd6a828e03909"
+                              "a67962e0ea1f61deb649f6bc3f4cef38c4f35504e51ec112"
+                              "de5c384df7ba0b8d578a4c702b6bf11d5f")
+                  << OP_CHECKSIG;
+    return CreateGenesisBlock(pszTimestamp, genesisOutputScript, nTime, nNonce,
+                              nBits, nVersion, genesisReward, isTestNet);
+}
+
+#define NEW_GENESIS_BLOCK 0
+#if NEW_GENESIS_BLOCK
+#include "arith_uint256.h"
+bool checkProofOfWork(uint256 hash, uint32_t nBits, const uint256 powLimit) {
+    bool fNegative;
+    bool fOverflow;
+    arith_uint256 bnTarget;
+
+    bnTarget.SetCompact(nBits, &fNegative, &fOverflow);
+    
+    // Check range
+    if (fNegative || bnTarget == 0 || fOverflow ||
+        bnTarget > UintToArith256(powLimit)) {
+        return false;
+    }
+
+    // Check proof of work matches claimed amount
+    if (UintToArith256(hash) > bnTarget) {
+        return false;
+    }
+
+    return true;
+}
+
+const CBlock newGenesisBlock(uint32_t nTime,
+                    uint32_t nBits, int32_t nVersion,
+                    const Amount genesisReward,
+                    const uint256 powLimit,
+                    bool isTestNet) {
+    CBlock genesis;
+    uint32_t nonce = 0;
+    printf("Generating new genesis block, could take a while...\n");
+    while (1) {
+        genesis = CreateGenesisBlock(nTime, nonce, nBits, nVersion, genesisReward, isTestNet);
+        if (checkProofOfWork(genesis.GetHash(), nBits, powLimit)) {
+            printf("\n----------NEW GENESIS BLOCK--------\n");
+            printf(" nTime : %d \n", nTime);
+            printf(" nBits : %d \n", nBits);
+            printf(" nonce : %d \n", nonce);
+            printf(" hash  : %s \n", genesis.GetHash().GetHex().c_str());
+            printf(" mrekle: %s \n", genesis.hashMerkleRoot.GetHex().c_str());
+            break;
+        }
+        nonce ++;
+    };
+
+    return genesis;
+}
+#endif
+/**
+ * Main network
+ */
+/**
+ * What makes a good checkpoint block?
+ * + Is surrounded by blocks with reasonable timestamps
+ *   (no blocks before with a timestamp after, none after with
+ *    timestamp before)
+ * + Contains no strange transactions
+ */
+class CMainParams : public CChainParams {
+public:
+    CMainParams() {
+        strNetworkID = "main";
+        consensus.BitcoinSoftForksHeight = 8000;
+        // consensus.BitcoinSoftForksHash = uint256S(
+        //     "00000000000000001573688db762f2e03cfe9bc7c6da8496c3f14743166d303a");
+        consensus.powLimit = uint256S(
+            "00000000ffffffffffffffffffffffffffffffffffffffffffffffffffffffff");
+        // two weeks
+        consensus.nPowTargetTimespan = 14 * 24 * 60 * 60;
+        consensus.nPowTargetSpacing = 10 * 60;
+        consensus.fPowAllowMinDifficultyBlocks = false;
+        // 95% of 2016
+        consensus.nRuleChangeActivationThreshold = 1916;
+        // nPowTargetTimespan / nPowTargetSpacing
+        consensus.nMinerConfirmationWindow = 2016;
+
+        // The half life for the ASERT DAA. For every (nASERTHalfLife) seconds behind schedule the blockchain gets,
+        // difficulty is cut in half. Doubled if blocks are ahead of schedule.
+        // Two days
+        consensus.nASERTHalfLife = 2 * 24 * 60 * 60;
+        // June 13, 2023 hard fork
+        consensus.asertActivationTime = 1686636000;
+        consensus.asertAnchorParams = Consensus::Params::ASERTAnchor {
+            21256,         // anchor block height
+            0x1836845b,    // anchor block nBits
+            1686641614,    // anchor block previous block timestamp
+        };
+
+        // The best chain should have at least this much work.
+        consensus.nMinimumChainWork = uint256S(
+            "0000000000000000000000000000000000000000001005d44e8d565081076370");
+
+        // By default assume that the signatures in ancestors of this block are
+        // valid.
+        consensus.defaultAssumeValid = uint256S(
+            "000000000000000000e45ad2fbcc5ff3e85f0868dd8f00ad4e92dffabe28f8d2");
+
+        // August 1, 2017 hard fork
+        consensus.uahfHeight = 1;
+
+        // November 13, 2017 hard fork
+        consensus.daaHeight = 0;
+
+        // February 2020, Genesis Upgrade
+        consensus.genesisHeight = GENESIS_ACTIVATION_MAIN;
+
+        /**
+         * The message start string is designed to be unlikely to occur in
+         * normal data. The characters are rarely used upper ASCII, not valid as
+         * UTF-8, and produce a large 32-bit integer with any alignment.
+         */
+        diskMagic[0] = 0x69;
+        diskMagic[1] = 0xC3;
+        diskMagic[2] = 0x5A;
+        diskMagic[3] = 0xA5;
+        netMagic[0] = 0x52;
+        netMagic[1] = 0x9B;
+        netMagic[2] = 0x68;
+        netMagic[3] = 0x96;
+        nDefaultPort = 9883;
+        nPruneAfterHeight = 100000;
+#if NEW_GENESIS_BLOCK
+        genesis = newGenesisBlock(1711638701,0x1d00ffff,0x20000000, 50 * COIN, consensus.powLimit,false);
+        exit(0);
+#endif
+        genesis = CreateGenesisBlock(0x5BEDB819, 0x4D8FDFF4, 0x18021FDB, 0x20000000,
+                                     50 * COIN, false);
+        consensus.hashGenesisBlock = genesis.GetHash();
+        assert(consensus.hashGenesisBlock ==
+               uint256S("000000000000000001d956714215d96ffc00e0afda4cd0a96c96f8d802b1662b"));
+        assert(genesis.hashMerkleRoot ==
+               uint256S("da2b9eb7e8a3619734a17b55c47bdd6fd855b0afa9c7e14e3a164a279e51bba9"));
+
+        // DNS seeds for bootstrapping peers.
+        vSeeds.push_back(CDNSSeedData("seed1.microvisionchain.com", "seed1.microvisionchain.com"));
+        vSeeds.push_back(CDNSSeedData("seed2.microvisionchain.com", "seed2.microvisionchain.com"));
+       
+        base58Prefixes[PUBKEY_ADDRESS] = std::vector<uint8_t>(1, 0);
+        base58Prefixes[SCRIPT_ADDRESS] = std::vector<uint8_t>(1, 5);
+        base58Prefixes[SECRET_KEY] = std::vector<uint8_t>(1, 128);
+        base58Prefixes[EXT_PUBLIC_KEY] = {0x04, 0x88, 0xB2, 0x1E};
+        base58Prefixes[EXT_SECRET_KEY] = {0x04, 0x88, 0xAD, 0xE4};
+
+        vFixedSeeds = std::vector<SeedSpec6>(
+            pnSeed6_main, pnSeed6_main + ARRAYLEN(pnSeed6_main));
+
+        fMiningRequiresPeers = true;
+        fDefaultConsistencyChecks = false;
+        fRequireStandard = true;
+        fMineBlocksOnDemand = true;
+
+        checkpointData = { {
+                {0       ,uint256S("000000000000000001d956714215d96ffc00e0afda4cd0a96c96f8d802b1662b")},
+                // Block height at which genesis lock stops
+                {10      ,uint256S("000000005ed7fcdbc7b1e02b2cade8aa5a6800d5c8266f935b2c0f26e420fb1b")},
+                {100     ,uint256S("0000000000000efeb84247cba43f34a88587113ef2382f1cc97a067ec91032e9")},
+                {1000    ,uint256S("000000000000040c71f55cc180ae44c9fe54c21b5b69ace211275ed55ba52c33")},
+                {2000    ,uint256S("0000000000001fa09f4ea818c304a3adfc8f220bb36bc7bff87ec275e99be416")},
+                {3000    ,uint256S("000000000000000310e8ddab9098c2ee573e430d6d8ebbc89dd27731eb7ba460")},
+                {4000    ,uint256S("00000000000000000bdad66ec2ac05fb41ffd0e8d79cbbdbad09a9a47adb9d98")},
+                {5000    ,uint256S("00000000000000000a3ab470c8ef06817771968eb788625e71debfe893be5f83")},
+                {6000    ,uint256S("000000000000000006990a28e7ffff8d26ce1496b3db2c0c0563fcec3df322ac")},
+                {7000    ,uint256S("00000000000000000beba1611b710233fac175805ac059078b437c4fbe027b0f")},
+                // Block height at which BIP34 BIP65 BIP66 BIP68 BIP112 and BIP113 becomes active
+                {8000    ,uint256S("00000000000000001573688db762f2e03cfe9bc7c6da8496c3f14743166d303a")},
+                {9000    ,uint256S("00000000000000001a40b48f48bf7bef5c3fc7d4e6cb853a43769a4333e6b175")},
+                {10000   ,uint256S("0000000000000000267cebf54e6744ea0ca3810dc9ac9a45f9bf2af9d1cc202e")},
+                {15000   ,uint256S("00000000000000001e42eaa37721614e3ccabca5060f3bcbb195021057564924")},
+                {20000   ,uint256S("00000000000000000d72037cdd71687274a92e868ca934349d5b3933c604d97e")},
+                // Block height at which ASERT DAA becomes active
+                {21256   ,uint256S("0000000000000000198c1b7ebd8e6bd5799677df335266c5fdc7497d9d888642")},
+                {40000   ,uint256S("000000000000000012324eaeaf85f43539018e693c3c391b7dd90f1d310ad5b1")},
+                {63000   ,uint256S("00000000000000000345a721609e094acc6577758783c0ae27c680a15e5f577c")},
+            }};
+
+        // Data as of block
+        // 00000000000000000a6d8c52708fde5cb1cb84c33dab6120315a9ea6e13e96c8
+        // (height 63095).
+        chainTxData = ChainTxData{
+            // UNIX timestamp of last known number of transactions.
+            1711339023,
+            // Total number of transactions between genesis and that timestamp
+            // (the tx=... number in the SetBestChain mvcd.log lines)
+            5545024,
+            // Estimated number of transactions per second after that timestamp.
+            0.1510394335512};
+
+        defaultBlockSizeParams = DefaultBlockSizeParams{
+            // activation time 
+            MAIN_NEW_BLOCKSIZE_ACTIVATION_TIME,
+            // max block size
+            MAIN_DEFAULT_MAX_BLOCK_SIZE,
+            // max generated block size before activation
+            MAIN_DEFAULT_MAX_GENERATED_BLOCK_SIZE_BEFORE,
+            // max generated block size after activation
+            MAIN_DEFAULT_MAX_GENERATED_BLOCK_SIZE_AFTER
+        };
+
+        fTestBlockCandidateValidity = false;
+        fDisbleBIP30Checks = false;
+        fCanDisbleBIP30Checks = false;
+    }
+};
+
+/**
+ * Testnet (v3)
+ */
+class CTestNetParams : public CChainParams {
+public:
+    CTestNetParams() {
+        strNetworkID = "test";
+        consensus.BitcoinSoftForksHeight = 227931;
+        // consensus.BitcoinSoftForksHash = uint256S(
+        //     "000000000000024b89b42a942fe0d9fea3bb44ab7bd1b19115dd6a759c0808b8");
+        consensus.powLimit = uint256S(
+            "00000000ffffffffffffffffffffffffffffffffffffffffffffffffffffffff");
+        // two weeks
+        consensus.nPowTargetTimespan = 14 * 24 * 60 * 60;
+        consensus.nPowTargetSpacing = 10 * 60;
+        consensus.fPowAllowMinDifficultyBlocks = true;
+        // 75% for testchains
+        consensus.nRuleChangeActivationThreshold = 1916;
+        // nPowTargetTimespan / nPowTargetSpacing
+        consensus.nMinerConfirmationWindow = 2016;
+
+        // The half life for the ASERT DAA. For every (nASERTHalfLife) seconds behind schedule the blockchain gets,
+        // difficulty is cut in half. Doubled if blocks are ahead of schedule.
+        // Two days
+        consensus.nASERTHalfLife = 2 * 24 * 60 * 60;
+        consensus.asertActivationTime = 1685426400;
+        consensus.asertAnchorParams = Consensus::Params::ASERTAnchor {
+            39112,         // anchor block height
+            0x1D00AD59,    // anchor block nBits
+            1685430375,    // anchor block previous block timestamp
+        };
+
+        // The best chain should have at least this much work.
+        consensus.nMinimumChainWork = uint256S(
+            "0000000000000000000000000000000000000000000000001388a1c5c60f2803");
+
+        // By default assume that the signatures in ancestors of this block are
+        // valid.
+        consensus.defaultAssumeValid = uint256S(
+            "000000000000000000e45ad2fbcc5ff3e85f0868dd8f00ad4e92dffabe28f8d2");
+
+        // August 1, 2017 hard fork
+        consensus.uahfHeight = 1;
+
+        // November 13, 2017 hard fork
+        consensus.daaHeight = 3186;
+
+        // February 2020, Genesis Upgrade
+        consensus.genesisHeight = GENESIS_ACTIVATION_TESTNET;
+
+        diskMagic[0] = 0xA5;
+        diskMagic[1] = 0x5A;
+        diskMagic[2] = 0xC3;
+        diskMagic[3] = 0x69;
+        netMagic[0] = 0xD4;
+        netMagic[1] = 0x48;
+        netMagic[2] = 0x28;
+        netMagic[3] = 0x12;
+        nDefaultPort = 19883;
+        nPruneAfterHeight = 100000;
+
+        genesis = CreateGenesisBlock(0x5BEDB819, 781518760, 0x1d00ffff, 0x20000000,
+                                     50 * COIN, true);
+        consensus.hashGenesisBlock = genesis.GetHash();
+        assert(consensus.hashGenesisBlock ==
+                 uint256S("000000005abc148d1e91534997189fcce59056c980a7164e8eca2e2ce29a1575"));
+        assert(genesis.hashMerkleRoot ==
+               uint256S("921c9ad4264610101e46b4e67b7c030fbcc4ca9633bbd40b3079a62cf3ef531d"));
+
+        vFixedSeeds.clear();
+        vSeeds.clear();
+        // nodes with support for servicebits filtering should be at the top
+        // MicroVisionChain seeder
+        vSeeds.push_back(CDNSSeedData("", "", true));
+
+        base58Prefixes[PUBKEY_ADDRESS] = std::vector<uint8_t>(1, 111);
+        base58Prefixes[SCRIPT_ADDRESS] = std::vector<uint8_t>(1, 196);
+        base58Prefixes[SECRET_KEY] = std::vector<uint8_t>(1, 239);
+        base58Prefixes[EXT_PUBLIC_KEY] = {0x04, 0x35, 0x87, 0xCF};
+        base58Prefixes[EXT_SECRET_KEY] = {0x04, 0x35, 0x83, 0x94};
+        vFixedSeeds = std::vector<SeedSpec6>(
+            pnSeed6_test, pnSeed6_test + ARRAYLEN(pnSeed6_test));
+
+        // vFixedSeeds.clear();
+        vSeeds.clear();
+
+        fMiningRequiresPeers = false;
+        fDefaultConsistencyChecks = false;
+        fRequireStandard = false;
+        fMineBlocksOnDemand = false;
+
+        checkpointData = { {
+            {0,     uint256S("000000005abc148d1e91534997189fcce59056c980a7164e8eca2e2ce29a1575")},
+            // Block height at which ASERT DAA becomes active
+            {39112, uint256S("00000000756eb376b63f0bcb4b818b8f13f58bd29591f63fe677932fa6d7ea0c")}
+            }};
+
+        // Data as of block
+        // 0000000070b8903fd89cc2ccb4ada9a570fd2b6c8a0174d8f6b6bd66ebb0b4be
+        // (height 85317).
+        chainTxData = ChainTxData{
+            // UNIX timestamp of last known number of transactions.
+            1713165358,
+            // Total number of transactions between genesis and that timestamp
+            // (the tx=... number in the SetBestChain mvcd.log lines)
+            4609228,
+            // Estimated number of transactions per second after that timestamp.
+            0.09348262988};
+            
+        defaultBlockSizeParams = DefaultBlockSizeParams{
+            // activation time 
+            TESTNET_NEW_BLOCKSIZE_ACTIVATION_TIME,
+            // max block size
+            TESTNET_DEFAULT_MAX_BLOCK_SIZE,
+            // max generated block size before activation
+            TESTNET_DEFAULT_MAX_GENERATED_BLOCK_SIZE_BEFORE,
+            // max generated block size after activation
+            TESTNET_DEFAULT_MAX_GENERATED_BLOCK_SIZE_AFTER
+        };
+
+        fTestBlockCandidateValidity = false;
+        fDisbleBIP30Checks = false;
+        fCanDisbleBIP30Checks = true;
+    }
+};
+
+
+static std::unique_ptr<CChainParams> globalChainParams;
+
+const CChainParams &Params() {
+    assert(globalChainParams);
+    return *globalChainParams;
+}
+
+void ResetNetMagic(CChainParams& chainParam, const std::string& hexcode)
+{
+    if(!HexToArray(hexcode, chainParam.netMagic))
+        throw std::runtime_error(strprintf("%s: Bad hex code %s.", __func__, hexcode)); 
+}
+
+
+bool HexToArray(const std::string& hexstring, CMessageHeader::MessageMagic& array){
+    if(!IsHexNumber(hexstring))
+        return false;
+
+    const std::vector<uint8_t> hexVect = ParseHex(hexstring);
+
+    if(hexVect.size()!= array.size())
+        return false;
+
+    std::copy(hexVect.begin(),hexVect.end(),array.begin());
+
+    return true;
+}
+
+std::unique_ptr<CChainParams> CreateChainParams(const std::string &chain) {
+    if (chain == CBaseChainParams::MAIN) {
+        return std::unique_ptr<CChainParams>(new CMainParams());
+    }
+
+    if (chain == CBaseChainParams::TESTNET) {
+        return std::unique_ptr<CChainParams>(new CTestNetParams());
+    }
+
+    throw std::runtime_error(
+        strprintf("%s: Unknown chain %s.", __func__, chain));
+}
+
+void SelectParams(const std::string &network) {
+    SelectBaseParams(network);
+    globalChainParams = CreateChainParams(network);
+
+    // If not mainnet, allow to set the parameter magicbytes (for testing propose)
+    const bool isMagicBytesSet = gArgs.IsArgSet("-magicbytes");
+    if(network != CBaseChainParams::MAIN && isMagicBytesSet){
+        const std::string magicbytesStr = gArgs.GetArg("-magicbytes", "0f0f0f0f");
+        LogPrintf("Manually set magicbytes [%s].\n",magicbytesStr);
+        ResetNetMagic(*globalChainParams,magicbytesStr);
+    }
+}
