@@ -51,6 +51,10 @@ cmake --build build --target mvclight_demo --config Debug
 - Watch 地址：保存到 `demo_watch.txt`，重启后自动加载
 - Header 同步位置：保存到 `demo_sync_state.bin`（上次 tip 高度+区块头），下次 Connect 从上次 tip 继续，不会从 genesis 重头拉取
 
+### 多连接容错
+
+Demo 使用轻量多连接管理器（`src/light/light_connman.h/.cpp`）：同时保持主连接 + 备用连接；主连接被节点断开时立即提升备用连接（零切换），并后台补连下一个种子，保证新交易同步尽量不中断。
+
 ### 自检模式
 
 ```bash

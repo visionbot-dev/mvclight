@@ -99,6 +99,11 @@ add_executable(test_light_peer_policy unit/test_light_peer_policy.cpp)
 target_link_libraries(test_light_peer_policy PRIVATE mvclight_objects)
 add_test(NAME test_light_peer_policy COMMAND test_light_peer_policy)
 
+# 轻量多连接管理器
+add_executable(test_light_connman unit/test_light_connman.cpp)
+target_link_libraries(test_light_connman PRIVATE mvclight_objects)
+add_test(NAME test_light_connman COMMAND test_light_connman)
+
 # 主网端到端同步（依赖外网，不加入 ctest；手动运行：test_mainnet_sync）
 add_executable(test_mainnet_sync integration/test_mainnet_sync.cpp)
 target_include_directories(test_mainnet_sync PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/unit)

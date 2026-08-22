@@ -33,6 +33,8 @@ set(MVCLIGHT_WHITELIST_SOURCES
     light/light_asert.cpp
     # ---- P2P 防拉黑策略 ----
     light/light_peer_policy.cpp
+    # ---- 轻量多连接管理器 ----
+    light/light_connman.cpp
 )
 
 # ---- 黑名单防回归：白名单中出现以下路径直接 FATAL ----

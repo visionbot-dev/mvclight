@@ -28,6 +28,7 @@
 #include <ctime>
 #include <filesystem>
 #include <fstream>
+#include <memory>
 #include <mutex>
 #include <set>
 #include <string>
@@ -133,7 +134,9 @@ std::atomic<bool> g_stop{false};
 std::atomic<bool> g_worker_running{false};
 std::atomic<bool> g_filter_dirty{false};
 std::atomic<bool> g_backfill_running{false};
+std::atomic<bool> g_stop_standby{false};
 std::thread g_worker;
+std::thread g_standby_thread;
 DemoState g_state;
 CLightChainStore g_chain;
 CLightWatchStore g_store;
@@ -584,13 +587,16 @@ bool ParseBlockAndMatch(const std::vector<uint8_t>& block, int64_t height,
 
 // 核心同步逻辑（GUI 工作线程与 --selftest 共用）
 bool RunSyncCore(const std::string& host, int port, std::string& err_out,
-                 bool wait_for_txs) {
-    CLightPeer peer;
-    AppendLog(g_state, "[sync] connecting to " + host + ":" + std::to_string(port));
-    if (!peer.ConnectAndHandshake(host, port, 10000, 10000)) {
-        err_out = "connect/handshake failed";
-        AppendLog(g_state, "[sync] " + err_out);
-        return false;
+                 bool wait_for_txs, CLightPeer* external_peer = nullptr) {
+    CLightPeer owned_peer;
+    CLightPeer& peer = external_peer ? *external_peer : owned_peer;
+    if (!external_peer) {
+        AppendLog(g_state, "[sync] connecting to " + host + ":" + std::to_string(port));
+        if (!peer.ConnectAndHandshake(host, port, 10000, 10000)) {
+            err_out = "connect/handshake failed";
+            AppendLog(g_state, "[sync] " + err_out);
+            return false;
+        }
     }
     {
         std::lock_guard<std::mutex> lock(g_state.mu);
@@ -840,6 +846,24 @@ bool RunSyncCore(const std::string& host, int port, std::string& err_out,
     return ok;
 }
 
+// 备用连接泵：保持备用连接存活，并冗余接收 merkleblock/tx
+void StandbyPump(CLightPeer* peer) {
+    while (!g_stop_standby.load() && peer && peer->IsConnected()) {
+        LightMessage msg;
+        if (!peer->ReadMessage(msg)) {
+            if (!peer->IsConnected()) break;
+            continue;
+        }
+        if (msg.command == "ping") {
+            (peer->SendMessage)("pong", msg.payload);
+        } else if (msg.command == "merkleblock") {
+            HandleMerkleBlock(msg, g_chain);
+        } else if (msg.command == "tx") {
+            HandleTxMessage(msg);
+        }
+    }
+}
+
 void WorkerMain(const std::string& host, int port) {
     g_worker_running = true;
     // 首选 UI 配置的 peer，断开后自动轮换备用种子
@@ -848,20 +872,68 @@ void WorkerMain(const std::string& host, int port) {
     for (size_t i = 0; i < kSeedPeersCount; ++i) peers.push_back(kSeedPeers[i]);
 
     size_t idx = 0;
+    std::unique_ptr<CLightPeer> primary;
+    std::unique_ptr<CLightPeer> standby;
     while (!g_stop.load()) {
-        std::string ph;
-        int pp = 0;
-        SplitHostPort(peers[idx % peers.size()], ph, pp);
-        AppendLog(g_state, "[sync] connecting to " + peers[idx % peers.size()]);
-        std::string err;
-        RunSyncCore(ph, pp, err, true);
-        if (g_stop.load()) break;
-        // 2 秒后换下一个种子，保证新交易同步尽量不中断
-        idx = (idx + 1) % peers.size();
-        AppendLog(g_state, "[sync] lost (" + err + "), switch peer in 2s");
-        for (int i = 0; i < 20 && !g_stop.load(); ++i) {
-            std::this_thread::sleep_for(std::chrono::milliseconds(100));
+        // 确保主连接存在
+        if (!primary) {
+            std::string ph;
+            int pp = 0;
+            SplitHostPort(peers[idx % peers.size()], ph, pp);
+            AppendLog(g_state, "[sync] connecting to " + peers[idx % peers.size()]);
+            auto p = std::make_unique<CLightPeer>();
+            if (!p->ConnectAndHandshake(ph, pp, 10000, 3000)) {
+                AppendLog(g_state, "[sync] connect failed, next seed in 1s");
+                idx = (idx + 1) % peers.size();
+                for (int i = 0; i < 10 && !g_stop.load(); ++i) {
+                    std::this_thread::sleep_for(std::chrono::milliseconds(100));
+                }
+                continue;
+            }
+            primary = std::move(p);
         }
+
+        // 确保备用连接存在（已握手，主连接断开时零切换提升）
+        if (!standby) {
+            std::string sh;
+            int sp = 0;
+            size_t sidx = (idx + 1) % peers.size();
+            SplitHostPort(peers[sidx], sh, sp);
+            auto s = std::make_unique<CLightPeer>();
+            if (s->ConnectAndHandshake(sh, sp, 10000, 1000)) {
+                RebuildFilter(*s); // 备用连接也装过滤器
+                g_stop_standby.store(false);
+                g_standby_thread = std::thread(StandbyPump, s.get());
+                standby = std::move(s);
+                AppendLog(g_state, "[sync] standby ready: " + peers[sidx]);
+            }
+            idx = (idx + 1) % peers.size();
+        }
+
+        // 主连接同步/稳态
+        std::string err;
+        RunSyncCore("", 0, err, true, primary.get());
+        if (g_stop.load()) break;
+
+        // 主连接断开：停备用泵，立即提升备用连接为主（零切换）
+        AppendLog(g_state, "[sync] primary lost (" + err + "), promoting standby");
+        if (g_standby_thread.joinable()) {
+            g_stop_standby.store(true);
+            g_standby_thread.join();
+        }
+        g_stop_standby.store(false);
+        primary = std::move(standby);
+        standby.reset();
+        if (!primary) {
+            AppendLog(g_state, "[sync] no standby available, reconnect in 1s");
+            for (int i = 0; i < 10 && !g_stop.load(); ++i) {
+                std::this_thread::sleep_for(std::chrono::milliseconds(100));
+            }
+        }
+    }
+    if (g_standby_thread.joinable()) {
+        g_stop_standby.store(true);
+        g_standby_thread.join();
     }
     RefreshTxList();
     g_worker_running = false;
