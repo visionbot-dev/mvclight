@@ -89,6 +89,11 @@ add_executable(test_light_asert unit/test_light_asert.cpp)
 target_link_libraries(test_light_asert PRIVATE mvclight_objects)
 add_test(NAME test_light_asert COMMAND test_light_asert)
 
+# Phase 5 共识：真实 11 块 MTP
+add_executable(test_light_chainstore unit/test_light_chainstore.cpp)
+target_link_libraries(test_light_chainstore PRIVATE mvclight_objects)
+add_test(NAME test_light_chainstore COMMAND test_light_chainstore)
+
 # 主网端到端同步（依赖外网，不加入 ctest；手动运行：test_mainnet_sync）
 add_executable(test_mainnet_sync integration/test_mainnet_sync.cpp)
 target_include_directories(test_mainnet_sync PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/unit)

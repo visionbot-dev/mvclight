@@ -25,6 +25,9 @@ public:
     int64_t TipHeight() const { return m_tip_height; }
     bool GetTip(LightBlockHeader& out) const;
 
+    // 真实 MTP：截至 height（含）最近最多 11 个块时间戳的中位数
+    int64_t GetMedianTimePast(int64_t height) const;
+
     // 累计工作量（Phase 2 占位：每块 +1；发布前替换为真实 2^256/(target+1) 累加）
     void AddWork();
     const uint256& ChainWork() const { return m_chainwork; }

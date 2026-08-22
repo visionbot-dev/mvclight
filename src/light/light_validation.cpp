@@ -55,7 +55,7 @@ bool HashLeTarget(const uint256& hash, const uint8_t target_be[32]) {
 
 bool ValidateHeader(const LightBlockHeader& h, const LightBlockHeader* prev,
                     int64_t height, bool historical_segment, int64_t adjusted_time_now,
-                    std::string& reason) {
+                    std::string& reason, int64_t mtp) {
     if (height < 0) {
         reason = "bad-height";
         return false;
@@ -87,10 +87,13 @@ bool ValidateHeader(const LightBlockHeader& h, const LightBlockHeader* prev,
         return false;
     }
 
-    // 3. 时间戳 > 前块时间（简化 MTP）
-    if (prev != nullptr && h.nTime <= prev->nTime) {
-        reason = "time-too-old";
-        return false;
+    // 3. 时间戳 > MTP（真实 11 块中位数；mtp<0 时回退前块时间）
+    {
+        int64_t min_time = (mtp >= 0) ? mtp : (prev != nullptr ? static_cast<int64_t>(prev->nTime) : 0);
+        if (h.nTime <= static_cast<uint32_t>(min_time)) {
+            reason = "time-too-old";
+            return false;
+        }
     }
 
     // 4. 时间戳 <= 调整后当前时间 + 2h

@@ -117,7 +117,11 @@ int CLightSync::ProcessHeaders(CLightPeer& peer, CLightChainStore& store,
                     prev_ptr = &prev;
                 }
                 std::string reason;
-                if (!ValidateHeader(h, prev_ptr, height, historical, adjusted_time_now, reason)) {
+                int64_t mtp = -1;
+                if (prev_ptr != nullptr) {
+                    mtp = store.GetMedianTimePast(height - 1);
+                }
+                if (!ValidateHeader(h, prev_ptr, height, historical, adjusted_time_now, reason, mtp)) {
                     last_reason = reason;
                     return -1;
                 }

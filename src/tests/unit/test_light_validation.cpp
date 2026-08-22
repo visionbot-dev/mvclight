@@ -74,6 +74,19 @@ int main() {
     CHECK(!ValidateHeader(old, &prev, 100, false, now, reason));
     CHECK(reason == "time-too-old");
 
+    // 真实 MTP：时间戳 <= MTP 拒绝，> MTP 通过
+    {
+        const int64_t mtp = static_cast<int64_t>(prev.nTime) + 30; // MTP 高于 prev.nTime
+        LightBlockHeader mtp_old;
+        MakeHeader(mtp_old, prev.GetHash(), static_cast<uint32_t>(mtp), 4);
+        CHECK(!ValidateHeader(mtp_old, &prev, 100, false, now, reason, mtp));
+        CHECK(reason == "time-too-old");
+
+        LightBlockHeader mtp_ok;
+        MakeHeader(mtp_ok, prev.GetHash(), static_cast<uint32_t>(mtp + 1), 4);
+        CHECK(ValidateHeader(mtp_ok, &prev, 100, false, now, reason, mtp));
+    }
+
     // time-too-new（重新挖矿）
     LightBlockHeader future;
     MakeHeader(future, prev.GetHash(), static_cast<uint32_t>(now + 3 * 3600), 4);

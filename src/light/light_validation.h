@@ -25,9 +25,10 @@
 namespace mvclight {
 
 // 校验单个 header；prev 为前一高度 header（可为 nullptr）
+// mtp >= 0 时使用真实 11 块中位时间戳校验 time-too-old；否则回退 prev->nTime（简化）
 bool ValidateHeader(const LightBlockHeader& h, const LightBlockHeader* prev,
                     int64_t height, bool historical_segment, int64_t adjusted_time_now,
-                    std::string& reason);
+                    std::string& reason, int64_t mtp = -1);
 
 // 校验 Checkpoint 累计工作量（及可选的 Checkpoint 哈希锚定）
 bool CheckCheckpoint(const CLightChainStore& store, const LightCheckpoint& cp);

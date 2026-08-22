@@ -1,5 +1,8 @@
 #include "light/light_chainstore.h"
 
+#include <algorithm>
+#include <vector>
+
 namespace mvclight {
 
 bool CLightChainStore::AddHeader(const LightBlockHeader& header, int64_t height) {
@@ -32,6 +35,18 @@ bool CLightChainStore::HasHash(const uint256& hash) const {
 
 bool CLightChainStore::GetTip(LightBlockHeader& out) const {
     return GetHeaderAtHeight(m_tip_height, out);
+}
+
+int64_t CLightChainStore::GetMedianTimePast(int64_t height) const {
+    std::vector<uint32_t> times;
+    for (int64_t h = height; h >= 0 && times.size() < 11; --h) {
+        LightBlockHeader hdr;
+        if (!GetHeaderAtHeight(h, hdr)) break;
+        times.push_back(hdr.nTime);
+    }
+    if (times.empty()) return 0;
+    std::sort(times.begin(), times.end());
+    return times[times.size() / 2];
 }
 
 void CLightChainStore::AddWork() {
