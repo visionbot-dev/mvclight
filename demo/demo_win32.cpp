@@ -675,8 +675,16 @@ bool RunSyncCore(const std::string& host, int port, std::string& err_out,
 
 void WorkerMain(const std::string& host, int port) {
     g_worker_running = true;
-    std::string err;
-    RunSyncCore(host, port, err, true);
+    while (!g_stop.load()) {
+        std::string err;
+        RunSyncCore(host, port, err, true);
+        if (g_stop.load()) break;
+        // 连接被节点断开：短暂等待后自动重连（断点续传，不重头拉）
+        AppendLog(g_state, "[sync] connection lost, reconnect in 5s: " + err);
+        for (int i = 0; i < 50 && !g_stop.load(); ++i) {
+            std::this_thread::sleep_for(std::chrono::milliseconds(100));
+        }
+    }
     RefreshTxList();
     g_worker_running = false;
     g_stop.store(false);

@@ -103,3 +103,8 @@ add_test(NAME test_light_peer_policy COMMAND test_light_peer_policy)
 add_executable(test_mainnet_sync integration/test_mainnet_sync.cpp)
 target_include_directories(test_mainnet_sync PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/unit)
 target_link_libraries(test_mainnet_sync PRIVATE mvclight_objects Threads::Threads)
+
+# 主网 MERKLEBLOCK 抓取调试（依赖外网，不加入 ctest；手动运行：test_merkleblock_fetch）
+add_executable(test_merkleblock_fetch integration/test_merkleblock_fetch.cpp)
+target_include_directories(test_merkleblock_fetch PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/unit)
+target_link_libraries(test_merkleblock_fetch PRIVATE mvclight_objects Threads::Threads)
