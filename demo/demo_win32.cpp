@@ -26,6 +26,7 @@
 #include <cstdio>
 #include <cstring>
 #include <ctime>
+#include <filesystem>
 #include <fstream>
 #include <mutex>
 #include <set>
@@ -197,6 +198,58 @@ int kDefaultPeerPort();
 int64_t GetNowMs() {
     return std::chrono::duration_cast<std::chrono::milliseconds>(
         std::chrono::steady_clock::now().time_since_epoch()).count();
+}
+
+constexpr const char* kSyncStateFile = "demo_sync_state.bin";
+constexpr const char* kWatchFile = "demo_watch.txt";
+constexpr const char* kStorePath = "demo_store";
+
+// 保存/加载上次同步 tip（80B header + height），用于断点续传
+bool SaveSyncState(const LightBlockHeader& tip, int64_t height) {
+    std::ofstream f(kSyncStateFile, std::ios::binary);
+    if (!f) return false;
+    const char magic[8] = {'M', 'V', 'C', 'L', 'D', 'E', 'M', 'O'};
+    f.write(magic, 8);
+    f.write(reinterpret_cast<const char*>(&height), sizeof(height));
+    std::vector<uint8_t> raw = tip.Serialize();
+    f.write(reinterpret_cast<const char*>(raw.data()), raw.size());
+    return f.good();
+}
+
+bool LoadSyncState(LightBlockHeader& tip, int64_t& height) {
+    std::ifstream f(kSyncStateFile, std::ios::binary);
+    if (!f) return false;
+    char magic[8];
+    f.read(magic, 8);
+    if (std::memcmp(magic, "MVCLDEMO", 8) != 0) return false;
+    f.read(reinterpret_cast<char*>(&height), sizeof(height));
+    std::vector<uint8_t> raw(LightBlockHeader::kHeaderSize);
+    f.read(reinterpret_cast<char*>(raw.data()), raw.size());
+    if (!f.good()) return false;
+    return tip.Deserialize(raw.data(), raw.size());
+}
+
+void SaveWatchList() {
+    std::ofstream f(kWatchFile);
+    if (!f) return;
+    std::lock_guard<std::mutex> lock(g_state.mu);
+    for (const auto& a : g_state.watch_addresses) {
+        f << a << "\n";
+    }
+}
+
+void LoadWatchList() {
+    std::ifstream f(kWatchFile);
+    if (!f) return;
+    std::string line;
+    std::lock_guard<std::mutex> lock(g_state.mu);
+    while (std::getline(f, line)) {
+        if (!line.empty() && line.back() == '\r') line.pop_back();
+        if (!line.empty()) {
+            g_state.watch_addresses.push_back(line);
+        }
+    }
+    g_state.dirty = true;
 }
 
 // 从所有 watch 地址重建交易列表（去重）
@@ -378,6 +431,34 @@ bool RunSyncCore(const std::string& host, int port, std::string& err_out,
     bool reached = false;
     bool finished = false;
 
+    // 断点续传：若存在上次同步状态，从上次 tip 继续，不从头拉
+    {
+        LightBlockHeader resume_tip;
+        int64_t resume_height = -1;
+        if (LoadSyncState(resume_tip, resume_height) && resume_height >= 0) {
+            chain.AddHeader(resume_tip, resume_height);
+            chain.AddWork(resume_tip.nBits);
+            locator = resume_tip.GetHash();
+            last_batch_height = resume_height;
+            AppendLog(g_state, "[sync] resume from height " + std::to_string(resume_height) +
+                      " hash=" + resume_tip.GetHash().GetHex());
+            {
+                std::lock_guard<std::mutex> lock(g_state.mu);
+                g_state.synced_height = resume_height;
+                g_state.dirty = true;
+            }
+            if (resume_height >= kCheckpointHeight) {
+                reached = true;
+                {
+                    std::lock_guard<std::mutex> lock(g_state.mu);
+                    g_state.checkpoint_ok = true;
+                    g_state.dirty = true;
+                }
+                AppendLog(g_state, "[sync] resume: checkpoint previously anchored");
+            }
+        }
+    }
+
     for (int batch = 0; batch < kMaxBatches && !g_stop.load() && !finished; ++batch) {
         std::vector<uint8_t> getheaders = MakeGetHeaders(locator);
         if (!(peer.SendMessage)("getheaders", getheaders)) {
@@ -527,6 +608,16 @@ bool RunSyncCore(const std::string& host, int port, std::string& err_out,
         }
     }
 
+    // 保存断点续传状态（GUI 与 selftest 共用）
+    {
+        LightBlockHeader tip;
+        if (chain.GetTip(tip)) {
+            SaveSyncState(tip, chain.TipHeight());
+            AppendLog(g_state, "[sync] saved sync state height=" +
+                      std::to_string(chain.TipHeight()));
+        }
+    }
+
     {
         std::lock_guard<std::mutex> lock(g_state.mu);
         g_state.syncing = false;
@@ -548,6 +639,7 @@ void WorkerMain(const std::string& host, int port) {
     g_worker_running = true;
     std::string err;
     RunSyncCore(host, port, err, true);
+    RefreshTxList();
     g_worker_running = false;
     g_stop.store(false);
     if (g_hwnd) PostMessage(g_hwnd, WM_APP_STATE, 0, 0);
@@ -706,6 +798,7 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
                 g_state.watch_addresses.push_back(addr);
                 g_state.dirty = true;
             }
+            SaveWatchList();
             g_filter_dirty.store(true); // 下次循环重建过滤器并发送 FILTERLOAD
             AppendLog(g_state, "[ui] watch add " + addr);
         } else if (id == IDC_WATCH_DEL) {
@@ -719,9 +812,15 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
                     g_state.dirty = true;
                 }
             }
+            SaveWatchList();
+            RefreshTxList();
             AppendLog(g_state, "[ui] watch remove");
         } else if (id == IDC_RESET_BTN) {
-            g_store.ClearMemory();
+            g_store.Close();
+            std::error_code ec;
+            std::filesystem::remove_all(kStorePath, ec);
+            g_store.Open(kStorePath);
+            std::remove(kSyncStateFile);
             {
                 std::lock_guard<std::mutex> lock(g_state.mu);
                 g_state.txs.clear();
@@ -729,7 +828,7 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
                 g_state.checkpoint_ok = false;
                 g_state.dirty = true;
             }
-            AppendLog(g_state, "[ui] force_reset_chain");
+            AppendLog(g_state, "[ui] force_reset_chain (store+sync state cleared)");
         } else if (id == IDC_CLEARLOG_BTN) {
             std::lock_guard<std::mutex> lock(g_state.mu);
             g_state.logs.clear();
@@ -828,6 +927,15 @@ int WINAPI WinMain(HINSTANCE hInst, HINSTANCE, LPSTR cmd, int nShow) {
         WSACleanup();
         return rc;
     }
+
+    // 加载持久化数据：watch 地址 + LevelDB 交易
+    LoadWatchList();
+    if (!g_store.Open(kStorePath)) {
+        AppendLog(g_state, "[store] open failed: " + std::string(kStorePath));
+    } else {
+        AppendLog(g_state, "[store] loaded " + std::string(kStorePath));
+    }
+    RefreshTxList();
 
     InitCommon();
 

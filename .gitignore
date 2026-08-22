@@ -36,3 +36,9 @@ store_test_*/
 *.db
 *.db-wal
 *.db-shm
+
+# Demo runtime files
+demo_store/
+demo_sync_state.bin
+demo_watch.txt
+demo_selftest.log

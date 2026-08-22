@@ -41,8 +41,14 @@ cmake --build build --target mvclight_demo --config Debug
 2. 默认连接真实主网种子 `47.242.24.63:9883`（可在顶部编辑框修改）
 3. 点击 **Connect**：显示握手状态、Header 同步进度、最新区块哈希、Checkpoint 锚定状态
 4. 在 **Watch address** 输入地址后点击 **Add**：地址进入 watch 列表；同步线程会重建 Bloom 过滤器并发送 `FILTERLOAD`，此后命中该地址的新交易会通过 `MERKLEBLOCK + TX` 配对验证后入库展示
-5. 点击 **Remove** 删除选中地址；**Reset** 重置链状态；**Clear Log** 清空日志
+5. 点击 **Remove** 删除选中地址；**Reset** 重置链状态（清空 LevelDB 与断点状态）；**Clear Log** 清空日志
 6. 点击 **Disconnect** 停止同步
+
+### 持久化与断点续传
+
+- 交易：保存到运行目录 `demo_store/`（LevelDB），重启后自动加载并显示
+- Watch 地址：保存到 `demo_watch.txt`，重启后自动加载
+- Header 同步位置：保存到 `demo_sync_state.bin`（上次 tip 高度+区块头），下次 Connect 从上次 tip 继续，不会从 genesis 重头拉取
 
 ### 自检模式
 
