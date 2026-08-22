@@ -1,3 +1,5 @@
+#include "light/light_chainstore.h"
+#include "light/light_checkpoints.h"
 #include "light/light_header.h"
 #include "light/light_message.h"
 #include "light/light_peer.h"
@@ -8,7 +10,10 @@
 #include <string>
 #include <vector>
 
+using mvclight::CLightChainStore;
 using mvclight::CLightPeer;
+using mvclight::CheckCheckpoint;
+using mvclight::GetBuiltinCheckpoint;
 using mvclight::LightBlockHeader;
 using mvclight::LightMessage;
 using mvclight::MainnetMagic;
@@ -83,6 +88,7 @@ int main() {
     std::printf("MAINNET_HANDSHAKE_OK state=%s\n", mvclight::ToString(peer.GetState()));
 
     std::vector<LightBlockHeader> headers;
+    CLightChainStore chain;
     uint256 locator; // 全零 = genesis
     bool done = false;
 
@@ -122,6 +128,8 @@ int main() {
                     return 1;
                 }
                 headers.push_back(h);
+                chain.AddHeader(h, static_cast<int64_t>(headers.size() - 1));
+                chain.AddWork(h.nBits);
             }
             got = true;
             if (!headers.empty()) {
@@ -162,6 +170,12 @@ int main() {
     const LightBlockHeader& anchor = headers[kTargetHeight];
     std::printf("MAINNET_ANCHOR height=%d hash=%s nBits=0x%08x time=%u\n",
                 kTargetHeight, anchor.GetHash().GetHex().c_str(), anchor.nBits, anchor.nTime);
+    std::printf("MAINNET_ANCHOR_CHAINWORK=%s\n", chain.ChainWork().GetHex().c_str());
+    if (!CheckCheckpoint(chain, GetBuiltinCheckpoint())) {
+        std::printf("MAINNET_CHECKPOINT_FAILED\n");
+        return 1;
+    }
+    std::printf("MAINNET_CHECKPOINT_OK\n");
     std::printf("MAINNET_TIP height=%zu hash=%s\n", headers.size() - 1,
                 headers.back().GetHash().GetHex().c_str());
     std::printf("MAINNET_E2E_OK\n");

@@ -49,12 +49,13 @@ int64_t CLightChainStore::GetMedianTimePast(int64_t height) const {
     return times[times.size() / 2];
 }
 
-void CLightChainStore::AddWork() {
-    // 占位：+1；真实公式在 Phase 2 完善（2^256 / (target+1)）
-    uint8_t* p = m_chainwork.begin();
-    for (size_t i = 0; i < m_chainwork.size(); ++i) {
-        if (++p[i] != 0) break;
-    }
+void CLightChainStore::AddWork(uint32_t nBits) {
+    // 与上游 GetBlockProof 一致：work = (~target / (target + 1)) + 1
+    arith_uint256 target;
+    target.SetCompact(nBits);
+    arith_uint256 work = (~target / (target + arith_uint256(1))) + arith_uint256(1);
+    m_chainwork_arith += work;
+    m_chainwork = m_chainwork_arith.ToUint256();
 }
 
 void CLightChainStore::Reset() {
@@ -62,6 +63,7 @@ void CLightChainStore::Reset() {
     m_by_hash.clear();
     m_tip_height = -1;
     m_chainwork.SetNull();
+    m_chainwork_arith = arith_uint256();
 }
 
 } // namespace mvclight

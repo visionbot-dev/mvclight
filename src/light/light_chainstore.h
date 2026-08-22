@@ -6,6 +6,7 @@
  * 提供按高度/哈希索引；Phase 3 接入 LevelDB/SQLite 持久化 meta。
  */
 
+#include "light/light_arith_uint256.h"
 #include "light/light_header.h"
 #include "light/light_uint256.h"
 
@@ -28,8 +29,8 @@ public:
     // 真实 MTP：截至 height（含）最近最多 11 个块时间戳的中位数
     int64_t GetMedianTimePast(int64_t height) const;
 
-    // 累计工作量（Phase 2 占位：每块 +1；发布前替换为真实 2^256/(target+1) 累加）
-    void AddWork();
+    // 累计工作量：每块 2^256/(target+1) 累加（与上游 GetBlockProof 一致）
+    void AddWork(uint32_t nBits);
     const uint256& ChainWork() const { return m_chainwork; }
 
     void Reset();
@@ -39,6 +40,7 @@ private:
     std::unordered_map<uint256, int64_t> m_by_hash;
     int64_t m_tip_height = -1;
     uint256 m_chainwork;
+    arith_uint256 m_chainwork_arith;
 };
 
 } // namespace mvclight

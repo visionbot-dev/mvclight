@@ -17,11 +17,12 @@ const LightCheckpoint& GetBuiltinCheckpoint() {
     //   height=21256（MVC 主网 ASERT 锚点高度）
     //   hash=000000000000000006f6631897b7095706a61148245e5dbf94166fe1d3c67623
     //   nBits=0x18366875
-    // nChainWork 暂为 null（跳过工作量校验）；待实现累计真实 chainwork 后填入。
+    //   nChainWork=000000000000000000000000000000000000000000023dfb816b391d12d40116
+    //     （逐块 2^256/(target+1) 累加，与上游 GetBlockProof 一致）
     static const LightCheckpoint cp = {
         21256,
         uint256S("000000000000000006f6631897b7095706a61148245e5dbf94166fe1d3c67623"),
-        uint256(), // nChainWork = null
+        uint256S("000000000000000000000000000000000000000000023dfb816b391d12d40116"),
     };
     return cp;
 }

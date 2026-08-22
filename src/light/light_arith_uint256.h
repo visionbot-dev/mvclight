@@ -30,6 +30,10 @@ public:
     arith_uint256& operator<<=(int shift);
     arith_uint256& operator>>=(int shift);
     arith_uint256& operator*=(uint64_t factor);
+    arith_uint256& operator+=(const arith_uint256& o);
+    arith_uint256& operator-=(const arith_uint256& o);
+    arith_uint256& operator/=(const arith_uint256& o);
+    arith_uint256 operator~() const;
 
     bool IsZero() const;
     bool operator==(const arith_uint256& o) const;
@@ -37,6 +41,7 @@ public:
     bool operator<(const arith_uint256& o) const;
     bool operator>(const arith_uint256& o) const { return o < *this; }
     bool operator<=(const arith_uint256& o) const { return !(o < *this); }
+    bool operator>=(const arith_uint256& o) const { return !(*this < o); }
 
     friend arith_uint256 operator*(const arith_uint256& a, uint64_t f) {
         arith_uint256 r = a;
@@ -51,6 +56,21 @@ public:
     friend arith_uint256 operator>>(const arith_uint256& a, int s) {
         arith_uint256 r = a;
         r >>= s;
+        return r;
+    }
+    friend arith_uint256 operator+(const arith_uint256& a, const arith_uint256& b) {
+        arith_uint256 r = a;
+        r += b;
+        return r;
+    }
+    friend arith_uint256 operator-(const arith_uint256& a, const arith_uint256& b) {
+        arith_uint256 r = a;
+        r -= b;
+        return r;
+    }
+    friend arith_uint256 operator/(const arith_uint256& a, const arith_uint256& b) {
+        arith_uint256 r = a;
+        r /= b;
         return r;
     }
 

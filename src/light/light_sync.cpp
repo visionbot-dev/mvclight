@@ -135,7 +135,7 @@ int CLightSync::ProcessHeaders(CLightPeer& peer, CLightChainStore& store,
                     }
                 }
                 store.AddHeader(h, height);
-                store.AddWork();
+                store.AddWork(h.nBits);
                 ++processed;
             }
             return processed;

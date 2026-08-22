@@ -109,15 +109,15 @@ int main() {
         LightBlockHeader h;
         MakeHeader(h, prev_hash, static_cast<uint32_t>(now - 100 + i * 10), 4);
         store.AddHeader(h, i);
-        store.AddWork();
+        store.AddWork(h.nBits);
         prev_hash = h.GetHash();
     }
     LightCheckpoint cp;
     cp.height = 4;
-    cp.nChainWork = uint256S("5"); // 5 块占位工作量
+    cp.nChainWork = uint256S("5"); // 真实 chainwork 远大于 5
     CHECK(CheckCheckpoint(store, cp));
 
-    cp.nChainWork = uint256S("6"); // 不足
+    cp.nChainWork = uint256S("ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff");
     CHECK(!CheckCheckpoint(store, cp));
 
     cp.nChainWork = uint256S("5");

@@ -417,9 +417,11 @@ endforeach()
 
 ### Phase 5：生产级加固与移动端交付
 
-**阶段目标**：深重组完整处理、异常防护、SQLite 后端、Android/iOS 交叉编译、主网端到端验证与发布包。
+**阶段目标**：深重组完整处理、异常防护、SQLite 后端、主网端到端验证与发布包。
 
-**预估工时**：15 人日
+> **范围更正（2026-08-22）**：按用户决定，**移动端交叉编译（Android/iOS）暂不纳入当前范围**。任务 5.5、5.6、5.9 及其 DoD 条目标记为“已移除/暂缓”，待后续有 NDK/macOS CI 环境再恢复。
+
+**预估工时**：15 人日（不含已移除的移动端任务）
 
 **任务清单**
 
@@ -429,16 +431,16 @@ endforeach()
 | 5.2 | 深重组完整处理 | `src/light/light_peer.cpp`、`src/light/light_sync.cpp` | 浅重组 ≤144 回滚并重确认；深重组暂停同步 + 回调；`force_reset_chain` 决策路径 |
 | 5.3 | 异常防护 | `src/light/light_message.cpp`、`src/light/light_peer.cpp` | 畸形/超长消息断开；时间偏差 >70min 告警；磁盘/权限错误路径全覆盖 |
 | 5.4 | 资源优化 | `src/light/light_pendingtx.cpp`、`src/light/light_txpool.cpp`、`src/light/light_filter.cpp`、`src/light/light_chainstore.cpp` | Pending 4096、TxPool 1024、过滤器定期重建、header cache 裁剪、内存峰值控制 |
-| 5.5 | Android 交叉编译 | `src/CMakeLists.txt`、`third_party/leveldb/CMakeLists.txt`、`third_party/secp256k1/CMakeLists.txt`、`third_party/univalue/CMakeLists.txt` | NDK r25+；arm64-v8a/armeabi-v7a/x86_64；`c++_shared` |
-| 5.6 | iOS 交叉编译 | 同上 + `src/light/light_watchstore_sqlite.cpp` | ios-cmake `OS64`/`SIMULATOR64`；framework 打包 |
-| 5.7 | 主网端到端测试 | `src/tests/e2e/test_e2e_mainnet.cpp` | 真实 Checkpoint；测试关注地址；真实交易；`sync_status` 暴露 checkpoint 字段 |
+| 5.5 | ~~Android 交叉编译~~（已移除/暂缓） | — | 需要 NDK r25+；恢复时再评估 |
+| 5.6 | ~~iOS 交叉编译~~（已移除/暂缓） | — | 需要 macOS/Xcode + ios-cmake；恢复时再评估 |
+| 5.7 | 主网端到端测试 | `src/tests/e2e/test_e2e_mainnet.cpp`、`src/tests/integration/test_mainnet_sync.cpp` | 真实 Checkpoint；测试关注地址；真实交易；`sync_status` 暴露 checkpoint 字段 |
 | 5.8 | 发布检查自动化 | `src/tests/ci/check_release.sh`、`src/tests/ci/check_blacklist.py`、`src/tests/ci/check_symbols.sh` | 附录 E.3 清单脚本化 |
-| 5.9 | Demo App 集成 | `src/examples/android/`、`src/examples/ios/` | 最小 App 调用全 API；可作为并行任务提前准备 |
+| 5.9 | ~~Demo App 集成~~（已移除/暂缓） | — | 待移动端范围恢复 |
 
 **验收标准（DoD）**
 
-- [ ] Android arm64-v8a/armeabi-v7a/x86_64 交叉编译通过，产出 `libmvclight.so`
-- [ ] iOS 真机 arm64 + 模拟器构建通过，产出 framework
+- [x] ~~Android arm64-v8a/armeabi-v7a/x86_64 交叉编译通过，产出 `libmvclight.so`~~（已移除/暂缓）
+- [x] ~~iOS 真机 arm64 + 模拟器构建通过，产出 framework~~（已移除/暂缓）
 - [ ] SQLite 与 LevelDB 后端共享同一测试套件全绿；同一 txid 跨端读取结果一致
 - [ ] 模拟 >144 深重组 → `ERR_DEEP_REORG` + 暂停同步；`force_reset_chain` 可恢复
 - [ ] 模糊/畸形消息注入 1 小时无崩溃

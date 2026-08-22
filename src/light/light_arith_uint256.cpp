@@ -135,6 +135,50 @@ arith_uint256& arith_uint256::operator*=(uint64_t factor) {
     return *this;
 }
 
+arith_uint256& arith_uint256::operator+=(const arith_uint256& o) {
+    uint64_t carry = 0;
+    for (int i = 0; i < kLimbCount; ++i) {
+        uint64_t cur = uint64_t(m_words[i]) + o.m_words[i] + carry;
+        m_words[i] = static_cast<uint32_t>(cur);
+        carry = cur >> 32;
+    }
+    return *this;
+}
+
+arith_uint256& arith_uint256::operator-=(const arith_uint256& o) {
+    uint64_t borrow = 0;
+    for (int i = 0; i < kLimbCount; ++i) {
+        uint64_t cur = uint64_t(m_words[i]) - uint64_t(o.m_words[i]) - borrow;
+        m_words[i] = static_cast<uint32_t>(cur);
+        borrow = (cur >> 32) & 1;
+    }
+    return *this;
+}
+
+arith_uint256 arith_uint256::operator~() const {
+    arith_uint256 r;
+    for (int i = 0; i < kLimbCount; ++i) r.m_words[i] = ~m_words[i];
+    return r;
+}
+
+arith_uint256& arith_uint256::operator/=(const arith_uint256& divisor) {
+    if (divisor.IsZero()) return *this; // 除零保持原值（调用方保证非零）
+    arith_uint256 quotient;
+    arith_uint256 rem;
+    for (int bit = 255; bit >= 0; --bit) {
+        rem <<= 1;
+        int word = bit / 32;
+        int off = bit % 32;
+        rem.m_words[0] |= (m_words[word] >> off) & 1;
+        if (rem >= divisor) {
+            rem -= divisor;
+            quotient.m_words[word] |= (1u << off);
+        }
+    }
+    *this = quotient;
+    return *this;
+}
+
 bool arith_uint256::IsZero() const {
     for (auto w : m_words) if (w != 0) return false;
     return true;
