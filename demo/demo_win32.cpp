@@ -284,6 +284,64 @@ void RefreshTxList() {
     g_state.dirty = true;
 }
 
+// ---- Base58Check 解码：地址 -> P2PKH scriptPubKey ----
+static const char* kBase58Alphabet =
+    "123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz";
+
+bool DecodeBase58(const std::string& s, std::vector<uint8_t>& out) {
+    std::vector<uint8_t> bignum(1, 0); // big-endian
+    for (char c : s) {
+        const char* p = strchr(kBase58Alphabet, c);
+        if (!p) return false;
+        int digit = static_cast<int>(p - kBase58Alphabet);
+        int carry = digit;
+        for (int i = static_cast<int>(bignum.size()) - 1; i >= 0; --i) {
+            int val = bignum[i] * 58 + carry;
+            bignum[i] = static_cast<uint8_t>(val & 0xff);
+            carry = val >> 8;
+        }
+        while (carry > 0) {
+            bignum.insert(bignum.begin(), static_cast<uint8_t>(carry & 0xff));
+            carry >>= 8;
+        }
+    }
+    for (char c : s) {
+        if (c == '1') {
+            bignum.insert(bignum.begin(), 0);
+        } else {
+            break;
+        }
+    }
+    out = bignum;
+    return true;
+}
+
+bool DecodeBase58Check(const std::string& s, std::vector<uint8_t>& out) {
+    std::vector<uint8_t> raw;
+    if (!DecodeBase58(s, raw) || raw.size() < 5) return false;
+    std::vector<uint8_t> payload(raw.begin(), raw.end() - 4);
+    std::vector<uint8_t> checksum(raw.end() - 4, raw.end());
+    uint8_t hash[32];
+    SHA256D(payload.data(), payload.size(), hash);
+    for (int i = 0; i < 4; ++i) {
+        if (hash[i] != checksum[i]) return false;
+    }
+    out = payload;
+    return true;
+}
+
+// 仅支持主网 P2PKH：version=0x00 + 20B hash160 -> scriptPubKey
+bool AddressToScriptPubKey(const std::string& addr, std::vector<uint8_t>& spk) {
+    std::vector<uint8_t> payload;
+    if (!DecodeBase58Check(addr, payload)) return false;
+    if (payload.size() != 21 || payload[0] != 0x00) return false;
+    spk = {0x76, 0xa9, 0x14}; // OP_DUP OP_HASH160 0x14
+    spk.insert(spk.end(), payload.begin() + 1, payload.end());
+    spk.push_back(0x88); // OP_EQUALVERIFY
+    spk.push_back(0xac); // OP_CHECKSIG
+    return true;
+}
+
 // 从 watch 地址重建 Bloom 过滤器并发送 FILTERLOAD
 void RebuildFilter(CLightPeer& peer) {
     // 防拉黑：过滤器整体重建限速
@@ -306,7 +364,12 @@ void RebuildFilter(CLightPeer& peer) {
     }
     CBloomFilter filter = CBloomFilter::Create(addrs.size(), 0.0001, 0, kBloomUpdateAll);
     for (const auto& a : addrs) {
-        filter.Insert(reinterpret_cast<const uint8_t*>(a.data()), a.size());
+        std::vector<uint8_t> spk;
+        if (!AddressToScriptPubKey(a, spk)) {
+            AppendLog(g_state, "[filter] unsupported address (only mainnet P2PKH): " + a);
+            continue;
+        }
+        filter.Insert(spk.data(), spk.size());
     }
     std::vector<uint8_t> payload;
     if (!filter.Serialize(payload)) {

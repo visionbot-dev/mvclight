@@ -79,10 +79,14 @@ int main() {
     }
     std::printf("HANDSHAKE_OK\n");
 
-    // FILTERLOAD
+    // FILTERLOAD（插入 P2PKH scriptPubKey，而不是地址字符串）
     CBloomFilter filter = CBloomFilter::Create(1, 0.0001, 0, kBloomUpdateAll);
-    std::string addr = "1By2LtxHQRwzhL2vYMNXuV2WQzkrXM4oS";
-    filter.Insert(reinterpret_cast<const uint8_t*>(addr.data()), addr.size());
+    std::vector<uint8_t> spk = {0x76, 0xa9, 0x14,
+                                0x02, 0x12, 0xec, 0xe6, 0x90, 0xda, 0xc5, 0xdf,
+                                0x41, 0x2d, 0xd3, 0xe0, 0x36, 0x57, 0xef, 0xd1,
+                                0x75, 0x86, 0x87, 0x22,
+                                0x88, 0xac};
+    filter.Insert(spk.data(), spk.size());
     std::vector<uint8_t> fl;
     filter.Serialize(fl);
     if (!(peer.SendMessage)("filterload", fl)) {
