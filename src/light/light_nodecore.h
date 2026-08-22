@@ -35,8 +35,10 @@ public:
 
 private:
     bool m_running = false;
-    void* m_connman = nullptr; // TODO: std::unique_ptr<CConnman>
-    void* m_peer_logic = nullptr; // TODO: std::unique_ptr<PeerLogicValidation>
+    void* m_connman = nullptr;      // std::unique_ptr<CConnman> 所有权在全局 g_connman
+    void* m_peer_logic = nullptr;   // PeerLogicValidation*
+    void* m_scheduler = nullptr;    // CScheduler*
+    void* m_thread_group = nullptr; // boost::thread_group*
 };
 
 } // namespace mvclight

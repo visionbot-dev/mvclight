@@ -14,9 +14,18 @@
 #include <validation.h>
 
 #include <boost/filesystem.hpp>
+#include <boost/thread.hpp>
 
+#include <chrono>
 #include <cstdio>
 #include <memory>
+
+#include <net/net_processing.h>
+#include <netmessagemaker.h>
+#include <protocol.h>
+#include <random.h>
+#include <scheduler.h>
+#include <ui_interface.h>
 
 // init.cpp 中被裁剪的全局 shutdown/connman（网络内核依赖）
 static std::shared_ptr<task::CCancellationSource> shutdownSource(task::CCancellationSource::Make());
@@ -113,12 +122,72 @@ bool CLightNodeCore::Start() {
                 chainActive.Tip() ? chainActive.Tip()->GetBlockHash().GetHex().c_str() : "(null)",
                 chainActive.Height());
     std::printf("[nodecore] mempool ok size=%lu\n", static_cast<unsigned long>(mempool.Size()));
+
+    // ---- Phase B-4：CConnman / PeerLogicValidation（init.cpp Step 6/11 裁剪版）----
+    boost::thread_group* threadGroup = new boost::thread_group();
+    CScheduler* scheduler = new CScheduler();
+    scheduler->startServiceThread(*threadGroup);
+    m_thread_group = threadGroup;
+    m_scheduler = scheduler;
+
+    g_connman = std::make_unique<CConnman>(
+        config,
+        GetRand(std::numeric_limits<uint64_t>::max()),
+        GetRand(std::numeric_limits<uint64_t>::max()),
+        std::chrono::milliseconds(0));
+    m_connman = g_connman.get();
+
+    PeerLogicValidation* plv = new PeerLogicValidation(g_connman.get());
+    m_peer_logic = plv;
+    RegisterValidationInterface(plv);
+    RegisterNodeSignals(GetNodeSignals());
+
+    CConnman::Options connOptions;
+    connOptions.nLocalServices = ServiceFlags(NODE_NETWORK | NODE_BLOOM);
+    connOptions.nRelevantServices = ServiceFlags(NODE_NETWORK);
+    connOptions.nMaxConnections = gArgs.GetArg("-maxconnections", 8);
+    connOptions.nMaxOutbound = std::min(MAX_OUTBOUND_CONNECTIONS, connOptions.nMaxConnections);
+    connOptions.nMaxAddnode = 0;
+    connOptions.nMaxFeeler = 1;
+    connOptions.nBestHeight = chainActive.Height();
+    connOptions.uiInterface = &uiInterface;
+    connOptions.nSendBufferMaxSize = gArgs.GetArgAsBytes("-maxsendbuffer", DEFAULT_MAXSENDBUFFER, ONE_KILOBYTE);
+    connOptions.nReceiveFloodSize = gArgs.GetArgAsBytes("-maxreceivebuffer", DEFAULT_MAXRECEIVEBUFFER, ONE_KILOBYTE);
+
+    std::string strNodeError;
+    if (!g_connman->Start(*scheduler, strNodeError, connOptions)) {
+        std::printf("[nodecore] connman.Start failed: %s\n", strNodeError.c_str());
+        return false;
+    }
+    std::printf("[nodecore] connman started\n");
+
     m_running = true;
     return true;
 }
 
 void CLightNodeCore::Stop() {
-    // TODO Phase B：停止 connman、注销 validation interface、清理 chainstate
+    if (g_connman) {
+        g_connman->Interrupt();
+        g_connman->Stop();
+        g_connman.reset();
+    }
+    m_connman = nullptr;
+
+    if (m_peer_logic) {
+        UnregisterValidationInterface(static_cast<PeerLogicValidation*>(m_peer_logic));
+        delete static_cast<PeerLogicValidation*>(m_peer_logic);
+        m_peer_logic = nullptr;
+    }
+
+    if (m_scheduler) {
+        delete static_cast<CScheduler*>(m_scheduler);
+        m_scheduler = nullptr;
+    }
+    if (m_thread_group) {
+        delete static_cast<boost::thread_group*>(m_thread_group);
+        m_thread_group = nullptr;
+    }
+
     UnloadBlockIndex();
     pcoinsTip.reset();
     delete pblocktree;
