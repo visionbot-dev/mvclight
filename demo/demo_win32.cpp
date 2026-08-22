@@ -979,6 +979,7 @@ void BackfillWorker(const std::string& host, int port, int n_blocks) {
 
     int64_t tip = g_chain.TipHeight();
     int scanned = 0;
+    std::string stop_reason;
     for (int i = 0; i < n_blocks && tip - i >= 0; ++i) {
         int64_t h = tip - i;
         LightBlockHeader hdr;
@@ -990,7 +991,8 @@ void BackfillWorker(const std::string& host, int port, int n_blocks) {
         const uint256& blk = hdr.GetHash();
         payload.insert(payload.end(), blk.begin(), blk.end());
         if (!(peer.SendMessage)("getdata", payload)) {
-            AppendLog(g_state, "[backfill] send failed (node disconnected)");
+            stop_reason = "send failed at height " + std::to_string(h) + " (node disconnected)";
+            AppendLog(g_state, "[backfill] " + stop_reason);
             break;
         }
 
@@ -1005,6 +1007,7 @@ void BackfillWorker(const std::string& host, int port, int n_blocks) {
                     g_backfill_running = false;
                     return;
                 }
+                stop_reason = "timeout waiting block at height " + std::to_string(h);
                 break; // 超时
             }
             if (msg.command == "block") {
@@ -1037,7 +1040,12 @@ void BackfillWorker(const std::string& host, int port, int n_blocks) {
 
     peer.Disconnect();
     RefreshTxList();
-    AppendLog(g_state, "[backfill] done scanned=" + std::to_string(scanned));
+    if (!stop_reason.empty()) {
+        AppendLog(g_state, "[backfill] done scanned=" + std::to_string(scanned) +
+                  " (stopped: " + stop_reason + ")");
+    } else {
+        AppendLog(g_state, "[backfill] done scanned=" + std::to_string(scanned));
+    }
     g_backfill_running = false;
     if (g_hwnd) PostMessage(g_hwnd, WM_APP_STATE, 0, 0);
 }
