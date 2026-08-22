@@ -33,6 +33,9 @@ public:
 
     bool IsRunning() const { return m_running; }
 
+    // 当前出站连接数（B-5 验证用）
+    size_t GetNodeCount() const;
+
 private:
     bool m_running = false;
     void* m_connman = nullptr;      // std::unique_ptr<CConnman> 所有权在全局 g_connman

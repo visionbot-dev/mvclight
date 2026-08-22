@@ -154,6 +154,10 @@ bool CLightNodeCore::Start() {
     connOptions.nSendBufferMaxSize = gArgs.GetArgAsBytes("-maxsendbuffer", DEFAULT_MAXSENDBUFFER, ONE_KILOBYTE);
     connOptions.nReceiveFloodSize = gArgs.GetArgAsBytes("-maxreceivebuffer", DEFAULT_MAXRECEIVEBUFFER, ONE_KILOBYTE);
 
+    // B-5：接入种子节点（一次性出站尝试）
+    g_connman->AddOneShot("47.242.24.63:9883");
+    g_connman->AddOneShot("47.242.24.64:9883");
+
     std::string strNodeError;
     if (!g_connman->Start(*scheduler, strNodeError, connOptions)) {
         std::printf("[nodecore] connman.Start failed: %s\n", strNodeError.c_str());
@@ -163,6 +167,11 @@ bool CLightNodeCore::Start() {
 
     m_running = true;
     return true;
+}
+
+size_t CLightNodeCore::GetNodeCount() const {
+    if (!g_connman) return 0;
+    return g_connman->GetNodeCount(CConnman::CONNECTIONS_OUT);
 }
 
 void CLightNodeCore::Stop() {

@@ -141,4 +141,11 @@ if(BUILD_MVC_LIGHT_UPSTREAM_CORE)
         ${CMAKE_CURRENT_SOURCE_DIR}/..
     )
     target_link_libraries(test_light_nodecore PRIVATE mvclight_nodecore)
+
+    add_executable(test_light_nodecore_net integration/test_light_nodecore_net.cpp)
+    target_include_directories(test_light_nodecore_net PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}/unit
+        ${CMAKE_CURRENT_SOURCE_DIR}/..
+    )
+    target_link_libraries(test_light_nodecore_net PRIVATE mvclight_nodecore)
 endif()
