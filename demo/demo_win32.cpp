@@ -619,7 +619,16 @@ bool RunSyncCore(const std::string& host, int port, std::string& err_out,
             g_state.dirty = true;
         }
         AppendLog(g_state, "[sync] steady-state: watching MERKLEBLOCK/TX");
+        int64_t last_ping_ms = GetNowMs();
         while (!g_stop.load()) {
+            // 主动心跳：避免被节点视为空闲连接断开
+            int64_t now = GetNowMs();
+            if (now - last_ping_ms >= 60000) {
+                if (peer.SendPing(static_cast<uint64_t>(now))) {
+                    AppendLog(g_state, "[sync] sent ping");
+                }
+                last_ping_ms = now;
+            }
             if (g_filter_dirty.load()) {
                 RebuildFilter(peer);
             }
@@ -675,13 +684,21 @@ bool RunSyncCore(const std::string& host, int port, std::string& err_out,
 
 void WorkerMain(const std::string& host, int port) {
     g_worker_running = true;
+    int attempt = 0;
     while (!g_stop.load()) {
         std::string err;
         RunSyncCore(host, port, err, true);
         if (g_stop.load()) break;
-        // 连接被节点断开：短暂等待后自动重连（断点续传，不重头拉）
-        AppendLog(g_state, "[sync] connection lost, reconnect in 5s: " + err);
-        for (int i = 0; i < 50 && !g_stop.load(); ++i) {
+        // 连接被节点断开：指数退避后自动重连（断点续传，不重头拉）
+        int64_t delay_ms = 5000;
+        if (attempt < 10) {
+            delay_ms = std::min<int64_t>(5000 * (1LL << attempt), 60000);
+        }
+        ++attempt;
+        AppendLog(g_state, "[sync] connection lost, reconnect in " +
+                  std::to_string(delay_ms / 1000) + "s (attempt " +
+                  std::to_string(attempt) + "): " + err);
+        for (int64_t i = 0; i < delay_ms / 100 && !g_stop.load(); ++i) {
             std::this_thread::sleep_for(std::chrono::milliseconds(100));
         }
     }
