@@ -21,6 +21,11 @@ set(MVCLIGHT_WHITELIST_SOURCES
     light/light_chainstore.cpp
     light/light_validation.cpp
     light/light_sync.cpp
+    # ---- Phase 3：MERKLEBLOCK 与交易同步 + 双表存储 ----
+    light/light_tx.cpp
+    light/light_pendingtx.cpp
+    light/light_merkle.cpp
+    light/light_watchstore.cpp
 )
 
 # ---- 黑名单防回归：白名单中出现以下路径直接 FATAL ----
