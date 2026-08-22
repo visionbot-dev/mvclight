@@ -31,13 +31,13 @@ int main() {
     CHECK(mvc_light_is_running(ctx) == 0);
     char state[64];
     CHECK(mvc_light_get_peer_state(ctx, state, sizeof(state)) == 0);
-    CHECK(std::strcmp(state, "DISCONNECTED") == 0);
+    CHECK(std::strcmp(state, "INIT") == 0);
 
     // 参数校验
     CHECK(mvc_light_get_peer_state(nullptr, state, sizeof(state)) == MVC_LIGHT_ERR_PARAM_INVALID);
     CHECK(mvc_light_get_peer_state(ctx, nullptr, sizeof(state)) == MVC_LIGHT_ERR_PARAM_INVALID);
     CHECK(mvc_light_watch_add(nullptr, "addr") == MVC_LIGHT_ERR_PARAM_INVALID);
-    CHECK(mvc_light_watch_add(ctx, "addr") == MVC_LIGHT_ERR_NOT_RUNNING);
+    CHECK(mvc_light_watch_add(ctx, "addr") == MVC_LIGHT_ERR_PEER_DISCONNECTED);
 
     mvc_light_destroy(ctx);
     TEST_MAIN_RETURN();

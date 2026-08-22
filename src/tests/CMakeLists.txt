@@ -62,3 +62,14 @@ add_executable(test_phase3 integration/test_phase3.cpp)
 target_include_directories(test_phase3 PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/unit)
 target_link_libraries(test_phase3 PRIVATE mvclight_objects)
 add_test(NAME test_phase3 COMMAND test_phase3)
+
+# Phase 4 单元测试
+add_executable(test_light_sendmonitor unit/test_light_sendmonitor.cpp)
+target_link_libraries(test_light_sendmonitor PRIVATE mvclight_objects)
+add_test(NAME test_light_sendmonitor COMMAND test_light_sendmonitor)
+
+# Phase 4 集成测试（C ABI + mock peer）
+add_executable(test_phase4 integration/test_phase4.cpp)
+target_include_directories(test_phase4 PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/unit)
+target_link_libraries(test_phase4 PRIVATE mvclight_objects Threads::Threads)
+add_test(NAME test_phase4 COMMAND test_phase4)
