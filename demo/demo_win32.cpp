@@ -55,7 +55,7 @@ using mvclight::uint256S;
 
 namespace {
 
-constexpr int kMaxBatches = 64;
+constexpr int kMaxBatches = 1024;
 constexpr int kCheckpointHeight = 21256;
 constexpr const char* kDefaultPeer = "47.242.24.63:9883";
 
@@ -243,8 +243,9 @@ bool RunSyncCore(const std::string& host, int port, std::string& err_out) {
     uint256 locator;
     int64_t last_batch_height = -1;
     bool reached = false;
+    bool finished = false;
 
-    for (int batch = 0; batch < kMaxBatches && !g_stop.load(); ++batch) {
+    for (int batch = 0; batch < kMaxBatches && !g_stop.load() && !finished; ++batch) {
         std::vector<uint8_t> getheaders = MakeGetHeaders(locator);
         if (!(peer.SendMessage)("getheaders", getheaders)) {
             err_out = "send getheaders failed";
@@ -328,6 +329,11 @@ bool RunSyncCore(const std::string& host, int port, std::string& err_out) {
                       std::to_string(chain.TipHeight()) + " tip=" +
                       (locator.IsNull() ? std::string("-") : locator.GetHex()));
             last_batch_height = chain.TipHeight();
+            if (count < 2000) {
+                finished = true;
+                AppendLog(g_state, "[sync] reached chain tip at height " +
+                          std::to_string(chain.TipHeight()));
+            }
             break;
         }
         if (!got) break;
@@ -339,9 +345,6 @@ bool RunSyncCore(const std::string& host, int port, std::string& err_out) {
             }
             AppendLog(g_state, reached ? "[sync] CHECKPOINT_ANCHORED" :
                       "[sync] checkpoint chainwork ok");
-        }
-        if (chain.TipHeight() >= kCheckpointHeight && reached) {
-            break;
         }
     }
 

@@ -51,7 +51,7 @@ cd build/demo/Debug
 ./demo_mvclight.exe --selftest
 ```
 
-成功时当前目录生成 `demo_selftest.log`，内容包含 `VISUAL_DEMO_READY`（会真实连接主网种子并同步至 Checkpoint 高度 21256）。
+成功时当前目录生成 `demo_selftest.log`，内容包含 `VISUAL_DEMO_READY`（会真实连接主网种子，校验 Checkpoint 高度 21256 后继续同步至链尖或达到批次上限）。
 
 ## 目录结构
 
