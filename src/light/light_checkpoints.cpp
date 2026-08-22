@@ -13,11 +13,15 @@ bool ChainWorkGe(const uint256& a, const uint256& b) {
 }
 
 const LightCheckpoint& GetBuiltinCheckpoint() {
-    // TODO(发布前)：从可信主网全节点导出真实 (height, hash, nChainWork)
+    // 2026-08-22 从主网种子 47.242.24.63:9883 实拉 22000 个头部校验后生成：
+    //   height=21256（MVC 主网 ASERT 锚点高度）
+    //   hash=000000000000000006f6631897b7095706a61148245e5dbf94166fe1d3c67623
+    //   nBits=0x18366875
+    // nChainWork 暂为 null（跳过工作量校验）；待实现累计真实 chainwork 后填入。
     static const LightCheckpoint cp = {
-        150000,
-        uint256S("0000000000000000000000000000000000000000000000000000000000000000"),
-        uint256S("0000000000000000000000000000000000000000000000000000000000000000"),
+        21256,
+        uint256S("000000000000000006f6631897b7095706a61148245e5dbf94166fe1d3c67623"),
+        uint256(), // nChainWork = null
     };
     return cp;
 }

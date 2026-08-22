@@ -149,6 +149,7 @@ void MockHeaderServer(bool send_bad, int count, std::atomic<int>& out_port,
         }
         std::vector<uint8_t> raw = h.Serialize();
         payload.insert(payload.end(), raw.begin(), raw.end());
+        payload.push_back(0); // tx-count（headers 消息每头后必须）
         prev = h.GetHash();
         t += 10;
     }

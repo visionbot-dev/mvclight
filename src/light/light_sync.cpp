@@ -91,16 +91,22 @@ int CLightSync::ProcessHeaders(CLightPeer& peer, CLightChainStore& store,
             const uint8_t* end = p + msg.payload.size();
             bool ok = true;
             uint64_t count = ReadCompactSize(p, end, ok);
-            if (!ok || count > 2000 || p + count * LightBlockHeader::kHeaderSize > end) {
+            // 真实节点 headers 消息：每个头后跟 1 字节 tx-count（varint 0）
+            if (!ok || count > 2000 || p + count * (LightBlockHeader::kHeaderSize + 1) > end) {
                 last_reason = "bad-headers-format";
                 return -1;
             }
             int processed = 0;
             for (uint64_t i = 0; i < count; ++i) {
+                const uint8_t* hp = p + i * (LightBlockHeader::kHeaderSize + 1);
                 LightBlockHeader h;
-                if (!h.Deserialize(p + i * LightBlockHeader::kHeaderSize,
-                                   LightBlockHeader::kHeaderSize)) {
+                if (!h.Deserialize(hp, LightBlockHeader::kHeaderSize)) {
                     last_reason = "bad-header-deserialize";
+                    return -1;
+                }
+                // tx-count 必须为 0（headers 消息不含交易）
+                if (hp[LightBlockHeader::kHeaderSize] != 0) {
+                    last_reason = "bad-headers-txcount";
                     return -1;
                 }
                 int64_t height = start_height + static_cast<int64_t>(i);
