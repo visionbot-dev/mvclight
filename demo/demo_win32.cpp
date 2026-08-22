@@ -343,14 +343,17 @@ bool AddressToScriptPubKey(const std::string& addr, std::vector<uint8_t>& spk) {
 }
 
 // 从 watch 地址重建 Bloom 过滤器并发送 FILTERLOAD
-void RebuildFilter(CLightPeer& peer) {
-    // 防拉黑：过滤器整体重建限速
-    static CLightPeerPolicy policy;
-    int64_t now = GetNowMs();
-    if (!policy.AllowFilterReload(now)) {
-        AppendLog(g_state, "[filter] reload throttled");
-        g_filter_dirty = false;
-        return;
+// force=true 时跳过重建限速（Backfill 使用独立连接，必须发送）
+void RebuildFilter(CLightPeer& peer, bool force = false) {
+    // 防拉黑：过滤器整体重建限速（仅普通路径生效）
+    if (!force) {
+        static CLightPeerPolicy policy;
+        int64_t now = GetNowMs();
+        if (!policy.AllowFilterReload(now)) {
+            AppendLog(g_state, "[filter] reload throttled");
+            g_filter_dirty = false;
+            return;
+        }
     }
 
     std::vector<std::string> addrs;
@@ -446,17 +449,17 @@ void CommitPairedTx(const PendingEntry& out) {
     RefreshTxList();
 }
 
-void HandleMerkleBlock(const LightMessage& msg, CLightChainStore& chain) {
+size_t HandleMerkleBlock(const LightMessage& msg, CLightChainStore& chain) {
     LightMerkleBlock mb;
     if (!mb.Deserialize(msg.payload.data(), msg.payload.size())) {
         AppendLog(g_state, "[merkle] deserialize failed");
-        return;
+        return 0;
     }
     std::vector<uint256> matched;
     uint256 root;
     if (!mb.ExtractMatches(matched, root)) {
         AppendLog(g_state, "[merkle] verify failed (root mismatch)");
-        return;
+        return 0;
     }
     int64_t height = -1;
     if (!chain.GetHeightByHash(mb.header.GetHash(), height)) {
@@ -471,7 +474,9 @@ void HandleMerkleBlock(const LightMessage& msg, CLightChainStore& chain) {
         }
     }
     AppendLog(g_state, "[merkle] block " + mb.header.GetHash().GetHex() +
+              " height=" + std::to_string(height) +
               " matched=" + std::to_string(matched.size()));
+    return matched.size();
 }
 
 void HandleTxMessage(const LightMessage& msg) {
@@ -785,8 +790,8 @@ void BackfillWorker(const std::string& host, int port, int n_blocks) {
         return;
     }
 
-    // 回扫需要过滤器命中，先按当前 watch 地址重建
-    RebuildFilter(peer);
+    // 回扫需要过滤器命中，先按当前 watch 地址重建（独立连接强制发送，不受限速影响）
+    RebuildFilter(peer, true);
 
     int64_t tip = g_chain.TipHeight();
     int scanned = 0;
@@ -802,9 +807,10 @@ void BackfillWorker(const std::string& host, int port, int n_blocks) {
         payload.insert(payload.end(), blk.begin(), blk.end());
         if (!(peer.SendMessage)("getdata", payload)) break;
 
-        // 读取 merkleblock + 后续 tx
+        // 读取 merkleblock + 全部后续 tx（按匹配数收齐，避免漏交易）
         bool got_mb = false;
         size_t tx_received = 0;
+        size_t matched_count = 0;
         for (int attempt = 0; attempt < 20; ++attempt) {
             LightMessage msg;
             if (!peer.ReadMessage(msg)) {
@@ -816,15 +822,21 @@ void BackfillWorker(const std::string& host, int port, int n_blocks) {
                 break; // 超时：本块结束
             }
             if (msg.command == "merkleblock") {
-                HandleMerkleBlock(msg, g_chain);
+                matched_count = HandleMerkleBlock(msg, g_chain);
                 got_mb = true;
+                if (matched_count == 0) break; // 无匹配，无需等 tx
             } else if (msg.command == "tx") {
                 HandleTxMessage(msg);
                 ++tx_received;
             } else if (msg.command == "ping") {
                 (peer.SendMessage)("pong", msg.payload);
             }
-            if (got_mb && tx_received > 0) break;
+            if (got_mb && tx_received >= matched_count) break;
+        }
+        if (matched_count > 0) {
+            AppendLog(g_state, "[backfill] height=" + std::to_string(h) +
+                      " matched=" + std::to_string(matched_count) +
+                      " tx_received=" + std::to_string(tx_received));
         }
 
         ++scanned;
