@@ -479,6 +479,7 @@ bool RunSyncCore(const std::string& host, int port, std::string& err_out,
                 }
                 AppendLog(g_state, "[sync] resume: checkpoint previously anchored");
             }
+            g_chain = chain; // 恢复后立即可供 Backfill 使用
         }
     }
 
@@ -605,6 +606,7 @@ bool RunSyncCore(const std::string& host, int port, std::string& err_out,
             AppendLog(g_state, reached ? "[sync] CHECKPOINT_ANCHORED" :
                       "[sync] checkpoint chainwork ok");
         }
+        g_chain = chain; // 每批更新，Backfill 随时可用
         // 防拉黑：批次之间保持间隔，避免突发请求
         std::this_thread::sleep_for(std::chrono::milliseconds(50));
     }
@@ -787,8 +789,9 @@ void RefreshUI(HWND hwnd) {
     std::lock_guard<std::mutex> lock(g_state.mu);
     SetText(hwnd, IDC_STATE_TEXT, "Peer: " + g_state.peer_state +
             (g_state.connected ? " [connected]" : " [disconnected]"));
-    SetText(hwnd, IDC_HEIGHT_TEXT, "Synced height: " +
-            std::to_string(g_state.synced_height));
+    int64_t h = g_state.synced_height;
+    SetText(hwnd, IDC_HEIGHT_TEXT, "Tip height: " + std::to_string(h) +
+            "  (synced blocks: " + std::to_string(h >= 0 ? h + 1 : 0) + ")");
     SetText(hwnd, IDC_HEADER_TEXT, "Latest: " + g_state.latest_hash +
             " time=" + std::to_string(g_state.latest_time) +
             " bits=0x" + [&]() {
