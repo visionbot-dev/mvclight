@@ -774,7 +774,7 @@ bool RunSyncCore(const std::string& host, int port, std::string& err_out,
     }
 
     // Header 同步完成后进入稳态：持续接收 MERKLEBLOCK/TX（GUI 模式）
-    if (wait_for_txs && !g_stop.load()) {
+    if (wait_for_txs && !g_stop.load() && err_out.empty()) {
         {
             std::lock_guard<std::mutex> lock(g_state.mu);
             g_state.syncing = false;
@@ -866,10 +866,12 @@ void StandbyPump(CLightPeer* peer) {
 
 void WorkerMain(const std::string& host, int port) {
     g_worker_running = true;
-    // 首选 UI 配置的 peer，断开后自动轮换备用种子
+    // 首选 UI 配置的 peer，断开后自动轮换备用种子（去重，避免备用连同一节点）
     std::vector<std::string> peers;
     peers.push_back(host + ":" + std::to_string(port));
-    for (size_t i = 0; i < kSeedPeersCount; ++i) peers.push_back(kSeedPeers[i]);
+    for (size_t i = 0; i < kSeedPeersCount; ++i) {
+        if (peers[0] != kSeedPeers[i]) peers.push_back(kSeedPeers[i]);
+    }
 
     size_t idx = 0;
     std::unique_ptr<CLightPeer> primary;
@@ -901,7 +903,7 @@ void WorkerMain(const std::string& host, int port) {
             SplitHostPort(peers[sidx], sh, sp);
             auto s = std::make_unique<CLightPeer>();
             if (s->ConnectAndHandshake(sh, sp, 10000, 1000)) {
-                RebuildFilter(*s); // 备用连接也装过滤器
+                RebuildFilter(*s, true); // 备用连接强制装过滤器，不影响主连接限速
                 g_stop_standby.store(false);
                 g_standby_thread = std::thread(StandbyPump, s.get());
                 standby = std::move(s);
@@ -915,17 +917,20 @@ void WorkerMain(const std::string& host, int port) {
         RunSyncCore("", 0, err, true, primary.get());
         if (g_stop.load()) break;
 
-        // 主连接断开：停备用泵，立即提升备用连接为主（零切换）
-        AppendLog(g_state, "[sync] primary lost (" + err + "), promoting standby");
+        // 主连接断开：停备用泵；若备用仍存活则立即提升（零切换），否则重建主连接
         if (g_standby_thread.joinable()) {
             g_stop_standby.store(true);
             g_standby_thread.join();
         }
         g_stop_standby.store(false);
-        primary = std::move(standby);
-        standby.reset();
-        if (!primary) {
-            AppendLog(g_state, "[sync] no standby available, reconnect in 1s");
+        if (standby && standby->IsConnected()) {
+            AppendLog(g_state, "[sync] primary lost (" + err + "), promoting standby");
+            primary = std::move(standby);
+            standby.reset();
+        } else {
+            AppendLog(g_state, "[sync] primary lost (" + err + "), standby unavailable");
+            standby.reset();
+            primary.reset();
             for (int i = 0; i < 10 && !g_stop.load(); ++i) {
                 std::this_thread::sleep_for(std::chrono::milliseconds(100));
             }
