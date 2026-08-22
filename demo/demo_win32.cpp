@@ -346,8 +346,8 @@ bool AddressToScriptPubKey(const std::string& addr, std::vector<uint8_t>& spk) {
 // force=true 时跳过重建限速（Backfill 使用独立连接，必须发送）
 void RebuildFilter(CLightPeer& peer, bool force = false) {
     // 防拉黑：过滤器整体重建限速（仅普通路径生效）
+    static CLightPeerPolicy policy;
     if (!force) {
-        static CLightPeerPolicy policy;
         int64_t now = GetNowMs();
         if (!policy.AllowFilterReload(now)) {
             AppendLog(g_state, "[filter] reload throttled");
