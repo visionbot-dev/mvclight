@@ -84,8 +84,16 @@ if(BUILD_MVC_LIGHT_UPSTREAM_CORE)
         ${CMAKE_CURRENT_SOURCE_DIR}/../third_party/microvisionchain/src/univalue/include
         "${BOOST_ROOT_CACHE}"
         "${OPENSSL_ROOT_CACHE}/include"
+        "${LIBEVENT_ROOT_CACHE}/include"
+        "${LIBEVENT_ROOT_CACHE}/../libevent-release-2.1.12-stable/include"
     )
-    target_link_libraries(mvclight_nodecore PUBLIC mvc_core)
+    target_link_libraries(mvclight_nodecore PUBLIC mvc_core
+        "${BOOST_ROOT_CACHE}/lib64-msvc-14.3/libboost_filesystem-vc143-mt-x64-1_85.lib"
+        "${BOOST_ROOT_CACHE}/lib64-msvc-14.3/libboost_chrono-vc143-mt-x64-1_85.lib"
+        "${BOOST_ROOT_CACHE}/lib64-msvc-14.3/libboost_program_options-vc143-mt-x64-1_85.lib"
+        "${BOOST_ROOT_CACHE}/lib64-msvc-14.3/libboost_thread-vc143-mt-x64-1_85.lib"
+        "${BOOST_ROOT_CACHE}/lib64-msvc-14.3/libboost_system-vc143-mt-x64-1_85.lib"
+    )
 endif()
 
 # 动态库：仅导出 mvc_light_*（符号可见性控制）

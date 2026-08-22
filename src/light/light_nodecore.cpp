@@ -20,11 +20,14 @@
 #include <cstdio>
 #include <memory>
 
+#include <mining/factory.h>
 #include <net/net_processing.h>
 #include <netmessagemaker.h>
 #include <protocol.h>
 #include <random.h>
+#include <rpc/webhook_client.h>
 #include <scheduler.h>
+#include <time_locked_mempool.h>
 #include <ui_interface.h>
 
 // init.cpp 中被裁剪的全局 shutdown/connman（网络内核依赖）
@@ -41,10 +44,14 @@ CLightNodeCore::~CLightNodeCore() { Stop(); }
 bool CLightNodeCore::Init(const std::string& network, const std::string& data_dir) {
     // Phase A：chainparams 与全局配置可初始化（已验证）
     SelectParams(network.empty() ? "main" : network);
+    std::printf("[nodecore] step selectparams ok\n");
+    std::fflush(stdout);
 
     // Phase B-1：签名/脚本执行缓存（init.cpp:3012-3013）
     InitSignatureCache();
     InitScriptExecutionCache();
+    std::printf("[nodecore] step caches ok\n");
+    std::fflush(stdout);
 
     ConfigInit& config = GlobalConfig::GetModifiableGlobalConfig();
     std::printf("[nodecore] init setdefault before\n");
@@ -61,11 +68,12 @@ bool CLightNodeCore::Init(const std::string& network, const std::string& data_di
     gArgs.SoftSetBoolArg("-listen", false);
     gArgs.SoftSetBoolArg("-dnsseed", true);
     gArgs.SoftSetArg("-maxconnections", "8");
-    gArgs.SoftSetArg("-debug", "net");
-    gArgs.SoftSetBoolArg("-printtoconsole", true);
+    std::printf("[nodecore] step gargs ok\n");
+    std::fflush(stdout);
 
     std::printf("[nodecore] init ok network=%s\n",
                 network.empty() ? "main" : network.c_str());
+    std::fflush(stdout);
     m_running = false; // Start() 成功后置 true
     return true;
 }
@@ -134,6 +142,8 @@ bool CLightNodeCore::Start() {
         std::printf("[nodecore] SetupNetworking failed\n");
         return false;
     }
+    std::printf("[nodecore] step setupnetworking ok\n");
+    std::fflush(stdout);
 
     boost::thread_group* threadGroup = new boost::thread_group();
     CScheduler* scheduler = new CScheduler();
@@ -147,11 +157,19 @@ bool CLightNodeCore::Start() {
         GetRand(std::numeric_limits<uint64_t>::max()),
         std::chrono::milliseconds(0));
     m_connman = g_connman.get();
+    std::printf("[nodecore] step connman ctor ok\n");
+    std::fflush(stdout);
 
     PeerLogicValidation* plv = new PeerLogicValidation(g_connman.get());
     m_peer_logic = plv;
+    std::printf("[nodecore] step peerlogic ctor ok\n");
+    std::fflush(stdout);
     RegisterValidationInterface(plv);
+    std::printf("[nodecore] step register validation ok\n");
+    std::fflush(stdout);
     RegisterNodeSignals(GetNodeSignals());
+    std::printf("[nodecore] step register nodesignals ok\n");
+    std::fflush(stdout);
 
     CConnman::Options connOptions;
     connOptions.nLocalServices = ServiceFlags(NODE_NETWORK | NODE_BLOOM);
@@ -171,6 +189,13 @@ bool CLightNodeCore::Start() {
         return false;
     }
     std::printf("[nodecore] connman started\n");
+
+    // init.cpp 3529-3561：msghand 运行时依赖
+    mining::g_miningFactory = std::make_unique<mining::CMiningFactory>(config);
+    mempool.getNonFinalPool().startPeriodicChecks(*scheduler);
+    rpc::client::g_pWebhookClient = std::make_unique<rpc::client::WebhookClient>(config);
+    CheckSafeModeParametersForAllForksOnStartup(config);
+    std::printf("[nodecore] runtime init ok\n");
 
     // B-5：直接发起种子连接（绕过 one-shot 线程，便于验证网络内核连通性）
     {
@@ -211,6 +236,9 @@ void CLightNodeCore::Stop() {
         delete static_cast<boost::thread_group*>(m_thread_group);
         m_thread_group = nullptr;
     }
+
+    rpc::client::g_pWebhookClient.reset();
+    mining::g_miningFactory.reset();
 
     UnloadBlockIndex();
     pcoinsTip.reset();
