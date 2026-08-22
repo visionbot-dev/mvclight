@@ -27,6 +27,10 @@ public:
     static constexpr uint32_t kRetryMaxMs = 300000;
     static constexpr int kServiceNodeNetwork = 1 << 0;
     static constexpr int kServiceNodeBloom = 1 << 2;
+    static constexpr int kMaxReorgDepth = 144; // 设计文档 §4.1.6
+
+    // 分叉深度 > MAX_REORG_DEPTH 判定为深重组
+    static bool IsDeepReorg(int64_t fork_depth) { return fork_depth > kMaxReorgDepth; }
 
     CLightPeer();
     ~CLightPeer();

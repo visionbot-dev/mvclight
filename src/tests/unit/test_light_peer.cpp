@@ -27,6 +27,10 @@ int main() {
         CHECK(lo <= hi);
     }
 
+    // 深重组阈值（§4.1.6）
+    CHECK(!CLightPeer::IsDeepReorg(144));
+    CHECK(CLightPeer::IsDeepReorg(145));
+
     // 状态机：SetState 仅允许合法迁移
     CLightPeer peer;
     CHECK(peer.GetState() == PeerState::INIT);
