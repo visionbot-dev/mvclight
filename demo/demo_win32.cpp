@@ -41,6 +41,7 @@
 #include "light/light_merkle.h"
 #include "light/light_message.h"
 #include "light/light_peer.h"
+#include "light/light_peer_policy.h"
 #include "light/light_pendingtx.h"
 #include "light/light_sha256.h"
 #include "light/light_validation.h"
@@ -50,6 +51,7 @@
 using mvclight::CBloomFilter;
 using mvclight::CLightChainStore;
 using mvclight::CLightPeer;
+using mvclight::CLightPeerPolicy;
 using mvclight::CLightWatchStore;
 using mvclight::CPendingTxMap;
 using mvclight::CheckCheckpoint;
@@ -280,6 +282,15 @@ void RefreshTxList() {
 
 // 从 watch 地址重建 Bloom 过滤器并发送 FILTERLOAD
 void RebuildFilter(CLightPeer& peer) {
+    // 防拉黑：过滤器整体重建限速
+    static CLightPeerPolicy policy;
+    int64_t now = GetNowMs();
+    if (!policy.AllowFilterReload(now)) {
+        AppendLog(g_state, "[filter] reload throttled");
+        g_filter_dirty = false;
+        return;
+    }
+
     std::vector<std::string> addrs;
     {
         std::lock_guard<std::mutex> lock(g_state.mu);
@@ -296,6 +307,14 @@ void RebuildFilter(CLightPeer& peer) {
     std::vector<uint8_t> payload;
     if (!filter.Serialize(payload)) {
         AppendLog(g_state, "[filter] serialize failed");
+        return;
+    }
+    // 预检：元素数/字节数超限不发，避免被节点断开
+    if (!policy.IsValidBloom(addrs.size(), payload.size(), 0, kBloomUpdateAll)) {
+        AppendLog(g_state, "[filter] reject oversized filter elements=" +
+                  std::to_string(addrs.size()) + " bytes=" +
+                  std::to_string(payload.size()));
+        g_filter_dirty = false;
         return;
     }
     if (!(peer.SendMessage)("filterload", payload)) {
@@ -582,6 +601,8 @@ bool RunSyncCore(const std::string& host, int port, std::string& err_out,
             AppendLog(g_state, reached ? "[sync] CHECKPOINT_ANCHORED" :
                       "[sync] checkpoint chainwork ok");
         }
+        // 防拉黑：批次之间保持间隔，避免突发请求
+        std::this_thread::sleep_for(std::chrono::milliseconds(50));
     }
 
     // Header 同步完成后进入稳态：持续接收 MERKLEBLOCK/TX（GUI 模式）

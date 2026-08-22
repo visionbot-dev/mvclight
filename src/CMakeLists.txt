@@ -31,6 +31,8 @@ set(MVCLIGHT_WHITELIST_SOURCES
     # ---- Phase 5：桌面端共识完善 ----
     light/light_arith_uint256.cpp
     light/light_asert.cpp
+    # ---- P2P 防拉黑策略 ----
+    light/light_peer_policy.cpp
 )
 
 # ---- 黑名单防回归：白名单中出现以下路径直接 FATAL ----

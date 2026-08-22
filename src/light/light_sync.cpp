@@ -2,9 +2,12 @@
 
 #include "light/light_asert.h"
 #include "light/light_header.h"
+#include "light/light_peer_policy.h"
 #include "light/light_validation.h"
 
+#include <chrono>
 #include <cstring>
+#include <thread>
 #include <vector>
 
 namespace mvclight {
@@ -56,6 +59,18 @@ void WriteCompactSize(std::vector<uint8_t>& out, uint64_t v) {
 
 bool CLightSync::SendGetHeaders(CLightPeer& peer, const LightCheckpoint& cp,
                                 const CLightChainStore& store) {
+    // 防拉黑：getheaders 批次限速（每 kGetHeadersMinIntervalMs 最多一批）
+    static CLightPeerPolicy policy;
+    auto now_ms = []() {
+        return std::chrono::duration_cast<std::chrono::milliseconds>(
+            std::chrono::steady_clock::now().time_since_epoch()).count();
+    };
+    if (!policy.AllowGetHeaders(now_ms())) {
+        std::this_thread::sleep_for(
+            std::chrono::milliseconds(CLightPeerPolicy::kGetHeadersMinIntervalMs));
+        policy.AllowGetHeaders(now_ms());
+    }
+
     std::vector<uint8_t> payload;
     WriteLE32(payload, 70016); // PROTOCOL_VERSION
 
