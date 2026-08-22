@@ -113,3 +113,25 @@ target_link_libraries(test_mainnet_sync PRIVATE mvclight_objects Threads::Thread
 add_executable(test_merkleblock_fetch integration/test_merkleblock_fetch.cpp)
 target_include_directories(test_merkleblock_fetch PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/unit)
 target_link_libraries(test_merkleblock_fetch PRIVATE mvclight_objects Threads::Threads)
+
+# mvc_core 冒烟测试（依赖外网内核，不加入 ctest；手动运行：test_mvc_core_smoke）
+if(BUILD_MVC_LIGHT_UPSTREAM_CORE)
+    add_executable(test_mvc_core_smoke integration/test_mvc_core_smoke.cpp)
+    target_include_directories(test_mvc_core_smoke PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}/unit
+        "${CMAKE_CURRENT_SOURCE_DIR}/../../third_party/microvisionchain/src"
+        "${BOOST_ROOT_CACHE}"
+        "${OPENSSL_ROOT_CACHE}/include"
+    )
+    target_link_directories(test_mvc_core_smoke PRIVATE
+        "${BOOST_ROOT_CACHE}/lib64-msvc-14.3"
+        "${OPENSSL_ROOT_CACHE}/lib/VC/x64/MD"
+    )
+    target_link_libraries(test_mvc_core_smoke PRIVATE mvc_core
+        "${BOOST_ROOT_CACHE}/lib64-msvc-14.3/libboost_filesystem-vc143-mt-x64-1_85.lib"
+        "${BOOST_ROOT_CACHE}/lib64-msvc-14.3/libboost_chrono-vc143-mt-x64-1_85.lib"
+        "${BOOST_ROOT_CACHE}/lib64-msvc-14.3/libboost_program_options-vc143-mt-x64-1_85.lib"
+        "${BOOST_ROOT_CACHE}/lib64-msvc-14.3/libboost_thread-vc143-mt-x64-1_85.lib"
+        "${BOOST_ROOT_CACHE}/lib64-msvc-14.3/libboost_system-vc143-mt-x64-1_85.lib"
+    )
+endif()
