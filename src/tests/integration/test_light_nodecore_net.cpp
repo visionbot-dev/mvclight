@@ -8,6 +8,7 @@
 
 #include <chrono>
 #include <cstdio>
+#include <cstdlib>
 #include <thread>
 
 int main() {
@@ -24,9 +25,9 @@ int main() {
         std::printf("NODECORE_START_FAILED\n");
         return 2;
     }
-    for (int i = 1; i <= 4; ++i) {
-        std::this_thread::sleep_for(std::chrono::seconds(5));
-        std::printf("NODECORE_CONNECTIONS %zu (t=%ds)\n", core.GetNodeCount(), i * 5);
+    for (int i = 1; i <= 10; ++i) {
+        std::this_thread::sleep_for(std::chrono::seconds(30));
+        std::printf("NODECORE_CONNECTIONS %zu (t=%ds)\n", core.GetNodeCount(), i * 30);
         std::fflush(stdout);
     }
     } catch (const std::exception& e) {
@@ -34,5 +35,6 @@ int main() {
         std::fflush(stdout);
         return 3;
     }
-    return 0;
+    std::fflush(stdout);
+    std::exit(0);
 }
