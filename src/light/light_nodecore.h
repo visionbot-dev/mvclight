@@ -31,6 +31,9 @@ public:
     // 停止并清理
     void Stop();
 
+    // 设置要连接的种子（host:port）；为空则用内置主网种子
+    void SetSeed(const std::string& hostport) { m_seed = hostport; }
+
     bool IsRunning() const { return m_running; }
 
     // 当前出站连接数（B-5 验证用）
@@ -38,6 +41,7 @@ public:
 
 private:
     bool m_running = false;
+    std::string m_seed;
     void* m_connman = nullptr;      // std::unique_ptr<CConnman> 所有权在全局 g_connman
     void* m_peer_logic = nullptr;   // PeerLogicValidation*
     void* m_scheduler = nullptr;    // CScheduler*

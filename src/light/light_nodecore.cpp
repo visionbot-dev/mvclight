@@ -211,12 +211,13 @@ bool CLightNodeCore::Start() {
     CheckSafeModeParametersForAllForksOnStartup(config);
     std::printf("[nodecore] runtime init ok\n");
 
-    // B-5：直接发起种子连接（绕过 one-shot 线程，便于验证网络内核连通性）
+    // B-5：发起种子连接（可指定本地 testnet；fOneShot=false 保持长连接）
     {
+        const char* seed = m_seed.empty() ? "47.242.24.63:9883" : m_seed.c_str();
         CAddress seedAddr;
-        NodeConnectInfo seedInfo{seedAddr, "47.242.24.63:9883"};
-        bool opened = g_connman->OpenNetworkConnection(seedInfo, nullptr, true);
-        std::printf("[nodecore] direct seed open=%d\n", opened ? 1 : 0);
+        NodeConnectInfo seedInfo{seedAddr, seed};
+        bool opened = g_connman->OpenNetworkConnection(seedInfo, nullptr, false);
+        std::printf("[nodecore] seed open(%s)=%d\n", seed, opened ? 1 : 0);
     }
 
     m_running = true;

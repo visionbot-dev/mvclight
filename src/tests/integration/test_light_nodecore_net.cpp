@@ -11,8 +11,12 @@
 #include <thread>
 
 int main() {
+    std::printf("MAIN_START\n");
+    std::fflush(stdout);
+    try {
     mvclight::CLightNodeCore core;
-    if (!core.Init("main", "demo_nodecore_net_data")) {
+    core.SetSeed("127.0.0.1:19883");
+    if (!core.Init("test", "demo_nodecore_net_data")) {
         std::printf("NODECORE_INIT_FAILED\n");
         return 1;
     }
@@ -24,6 +28,11 @@ int main() {
         std::this_thread::sleep_for(std::chrono::seconds(5));
         std::printf("NODECORE_CONNECTIONS %zu (t=%ds)\n", core.GetNodeCount(), i * 5);
         std::fflush(stdout);
+    }
+    } catch (const std::exception& e) {
+        std::printf("EXCEPTION: %s\n", e.what());
+        std::fflush(stdout);
+        return 3;
     }
     return 0;
 }
