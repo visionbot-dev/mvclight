@@ -30,11 +30,13 @@ int main() {
         std::printf("NODECORE_CONNECTIONS %zu (t=%ds)\n", core.GetNodeCount(), i * 30);
         std::fflush(stdout);
     }
+    core.Stop();
+    std::printf("NODECORE_STOPPED\n");
+    std::fflush(stdout);
     } catch (const std::exception& e) {
         std::printf("EXCEPTION: %s\n", e.what());
         std::fflush(stdout);
         return 3;
     }
-    std::fflush(stdout);
-    std::exit(0);
+    std::_Exit(0);
 }

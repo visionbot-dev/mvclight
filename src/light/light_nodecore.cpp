@@ -230,36 +230,68 @@ size_t CLightNodeCore::GetNodeCount() const {
 }
 
 void CLightNodeCore::Stop() {
-    if (g_connman) {
-        g_connman->Interrupt();
-        g_connman->Stop();
-        g_connman.reset();
-    }
-    m_connman = nullptr;
+    std::printf("[nodecore] stop begin\n");
+    std::fflush(stdout);
+    StartShutdown(); // 触发全局取消信号
 
+    // 按 init.cpp Shutdown() 顺序：先注销/释放 peerLogic
     if (m_peer_logic) {
         UnregisterValidationInterface(static_cast<PeerLogicValidation*>(m_peer_logic));
         delete static_cast<PeerLogicValidation*>(m_peer_logic);
         m_peer_logic = nullptr;
     }
+    std::printf("[nodecore] stop peerlogic done\n");
+    std::fflush(stdout);
+
+    rpc::client::g_pWebhookClient.reset();
+    std::printf("[nodecore] stop webhook done\n");
+    std::fflush(stdout);
+    mining::g_miningFactory.reset();
+    std::printf("[nodecore] stop mining done\n");
+    std::fflush(stdout);
+
+    if (g_connman) {
+        std::printf("[nodecore] stop connman before\n");
+        std::fflush(stdout);
+        g_connman->Interrupt();
+        // 注意：g_connman->Stop() 内部线程 join 在此环境会阻塞；
+        // 生产接入前需按 init.cpp Interrupt+Stop 顺序进一步排查。
+        // 先保留 g_connman 存活，避免悬垂；进程退出用 _Exit 跳过静态析构。
+        std::printf("[nodecore] stop connman interrupted\n");
+        std::fflush(stdout);
+        // g_connman->Stop();
+        // g_connman.reset();
+    }
+    m_connman = nullptr;
+    std::printf("[nodecore] stop connman done\n");
+    std::fflush(stdout);
+
+    ShutdownScriptCheckQueues();
+    UnregisterNodeSignals(GetNodeSignals());
+    std::printf("[nodecore] stop queues done\n");
+    std::fflush(stdout);
 
     if (m_scheduler) {
+        static_cast<CScheduler*>(m_scheduler)->stop(false);
         delete static_cast<CScheduler*>(m_scheduler);
         m_scheduler = nullptr;
     }
     if (m_thread_group) {
+        static_cast<boost::thread_group*>(m_thread_group)->interrupt_all();
+        static_cast<boost::thread_group*>(m_thread_group)->join_all();
         delete static_cast<boost::thread_group*>(m_thread_group);
         m_thread_group = nullptr;
     }
-
-    rpc::client::g_pWebhookClient.reset();
-    mining::g_miningFactory.reset();
+    std::printf("[nodecore] stop scheduler done\n");
+    std::fflush(stdout);
 
     UnloadBlockIndex();
     pcoinsTip.reset();
     delete pblocktree;
     pblocktree = nullptr;
     m_running = false;
+    std::printf("[nodecore] stop done\n");
+    std::fflush(stdout);
 }
 
 } // namespace mvclight
